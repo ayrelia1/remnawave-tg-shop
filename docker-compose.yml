@@ -1,7 +1,10 @@
 services:
   remnawave-tg-shop:
-    image: kavore/remnawave-tg-shop:latest
-#    build: .
+    # image: kavore/remnawave-tg-shop:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: remnawave-tg-shop
     container_name: remnawave-tg-shop
     hostname: remnawave-tg-shop
     env_file:
@@ -14,6 +17,8 @@ services:
     depends_on:
       remnawave-tg-shop-db:
         condition: service_healthy
+    ports:
+      - '127.0.0.1:8080:8080'
 
   remnawave-tg-shop-db:
     image: postgres:17
