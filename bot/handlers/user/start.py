@@ -36,7 +36,8 @@ async def send_main_menu(target_event: Union[types.Message,
                          i18n_data: dict,
                          subscription_service: SubscriptionService,
                          session: AsyncSession,
-                         is_edit: bool = False):
+                         is_edit: bool = False,
+                         panel_service=None):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
 
@@ -76,8 +77,63 @@ async def send_main_menu(target_event: Union[types.Message,
             )
 
     text = _(key="main_menu_greeting", user_name=user_full_name)
+
+    # Enrich main menu with active subscription info
+    connect_url: Optional[str] = None
+    use_mini_app: bool = False
+    try:
+        active = await subscription_service.get_active_subscription_details(session, user_id)
+        if active:
+            end_date = active.get("end_date")
+            days_left = max(0, (end_date.date() - datetime.now(timezone.utc).date()).days) if end_date else 0
+
+            max_devices_val = active.get("max_devices")
+            if max_devices_val in (None, 0):
+                max_devices_str = _(key="devices_unlimited_label")
+            else:
+                max_devices_str = str(int(max_devices_val))
+
+            current_devices_str = "?"
+            user_uuid = active.get("user_id")
+            if panel_service and user_uuid:
+                try:
+                    devices_response = await panel_service.get_user_devices(user_uuid)
+                    if devices_response:
+                        if isinstance(devices_response, dict):
+                            dl = devices_response.get("devices")
+                            if isinstance(dl, list):
+                                current_devices_str = str(len(dl))
+                            elif isinstance(dl, int):
+                                current_devices_str = str(dl)
+                            else:
+                                total = devices_response.get("total")
+                                if isinstance(total, int):
+                                    current_devices_str = str(total)
+                        elif isinstance(devices_response, list):
+                            current_devices_str = str(len(devices_response))
+                except Exception as exc:
+                    logging.debug("Failed to fetch devices for main menu: %s", exc)
+
+            sub_info = _(
+                key="main_menu_subscription_info",
+                end_date=end_date.strftime("%d.%m.%Y") if end_date else "N/A",
+                days_left=days_left,
+                current_devices=current_devices_str,
+                max_devices=max_devices_str,
+            )
+            text = text + "\n\n" + sub_info
+
+            if settings.SUBSCRIPTION_MINI_APP_URL:
+                use_mini_app = True
+            else:
+                connect_url = active.get("connect_button_url") or active.get("config_link")
+    except Exception as exc:
+        logging.debug("Failed to enrich main menu with subscription info: %s", exc)
+
     reply_markup = get_main_menu_inline_keyboard(current_lang, i18n, settings,
-                                                 show_trial_button_in_menu)
+                                                 show_trial_button_in_menu,
+                                                 connect_url=connect_url,
+                                                 use_mini_app=use_mini_app)
 
     target_message_obj: Optional[types.Message] = None
     if isinstance(target_event, types.Message):
@@ -334,6 +390,7 @@ async def start_command_handler(message: types.Message,
                                 i18n_data: dict,
                                 subscription_service: SubscriptionService,
                                 session: AsyncSession,
+                                panel_service=None,
                                 ref_match: Optional[re.Match] = None,
                                 promo_match: Optional[re.Match] = None,
                                 ad_param_match: Optional[re.Match] = None):
@@ -486,10 +543,6 @@ async def start_command_handler(message: types.Message,
                                                       db_user):
         return
 
-    # Send welcome message if not disabled
-    if not settings.DISABLE_WELCOME_MESSAGE:
-        await message.answer(_(key="welcome", user_name=hd.quote(user.full_name)))
-
     # Auto-apply promo code if provided via start parameter
     if promo_code_to_apply:
         try:
@@ -585,7 +638,8 @@ async def start_command_handler(message: types.Message,
                          i18n_data,
                          subscription_service,
                          session,
-                         is_edit=False)
+                         is_edit=False,
+                         panel_service=panel_service)
 
 
 @router.callback_query(F.data == "channel_subscription:verify")
@@ -594,7 +648,8 @@ async def verify_channel_subscription_callback(
         settings: Settings,
         i18n_data: dict,
         subscription_service: SubscriptionService,
-        session: AsyncSession):
+        session: AsyncSession,
+        panel_service=None):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
 
@@ -614,36 +669,19 @@ async def verify_channel_subscription_callback(
     else:
         _ = lambda key, **kwargs: key
 
-    if not settings.DISABLE_WELCOME_MESSAGE:
-        welcome_text = _(key="welcome",
-                         user_name=hd.quote(callback.from_user.full_name))
-        if callback.message:
-            await safe_edit_text(callback.message, welcome_text)
-        else:
-            fallback_bot: Optional[Bot] = getattr(callback, "bot", None)
-            if fallback_bot:
-                await fallback_bot.send_message(callback.from_user.id,
-                                                welcome_text)
-
     try:
         await callback.answer(_(key="channel_subscription_verified_success"),
                               show_alert=True)
     except Exception as exc:
         logging.debug("Suppressed exception in bot/handlers/user/start.py: %s", exc)
 
-    menu_target_event: Union[types.Message, types.CallbackQuery] = callback
-    should_edit_menu_message = bool(callback.message)
-
-    if not settings.DISABLE_WELCOME_MESSAGE and callback.message:
-        menu_target_event = callback.message
-        should_edit_menu_message = False
-
-    await send_main_menu(menu_target_event,
+    await send_main_menu(callback,
                          settings,
                          i18n_data,
                          subscription_service,
                          session,
-                         is_edit=should_edit_menu_message)
+                         is_edit=bool(callback.message),
+                         panel_service=panel_service)
 
 
 @router.message(Command("language"))
@@ -691,7 +729,8 @@ async def language_command_handler(
 @router.callback_query(F.data.startswith("set_lang_"))
 async def select_language_callback_handler(
         callback: types.CallbackQuery, i18n_data: dict, settings: Settings,
-        subscription_service: SubscriptionService, session: AsyncSession):
+        subscription_service: SubscriptionService, session: AsyncSession,
+        panel_service=None):
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     if not i18n or not callback.message:
         await callback.answer("Service error or message context lost.",
@@ -731,7 +770,8 @@ async def select_language_callback_handler(
                          i18n_data,
                          subscription_service,
                          session,
-                         is_edit=True)
+                         is_edit=True,
+                         panel_service=panel_service)
 
 
 @router.callback_query(F.data.startswith("main_action:"))
@@ -791,13 +831,15 @@ async def main_action_callback_handler(
                              i18n_data,
                              subscription_service,
                              session,
-                             is_edit=True)
+                             is_edit=True,
+                             panel_service=panel_service)
     elif action == "back_to_main_keep":
         await send_main_menu(callback,
                              settings,
                              i18n_data,
                              subscription_service,
                              session,
-                             is_edit=False)
+                             is_edit=False,
+                             panel_service=panel_service)
     else:
         await callback.answer(_("main_menu_unknown_action"), show_alert=True)

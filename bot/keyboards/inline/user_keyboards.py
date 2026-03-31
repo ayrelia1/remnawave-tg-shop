@@ -9,9 +9,23 @@ def get_main_menu_inline_keyboard(
         lang: str,
         i18n_instance,
         settings: Settings,
-        show_trial_button: bool = False) -> InlineKeyboardMarkup:
+        show_trial_button: bool = False,
+        connect_url: Optional[str] = None,
+        use_mini_app: bool = False) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
+
+    if use_mini_app and settings.SUBSCRIPTION_MINI_APP_URL:
+        builder.row(
+            InlineKeyboardButton(
+                text=_("connect_button"),
+                web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
+            )
+        )
+    elif connect_url:
+        builder.row(
+            InlineKeyboardButton(text=_("connect_button"), url=connect_url)
+        )
 
     if show_trial_button and settings.TRIAL_ENABLED:
         builder.row(

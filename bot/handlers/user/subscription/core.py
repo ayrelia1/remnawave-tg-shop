@@ -246,12 +246,21 @@ async def my_subscription_command_handler(
             config_link=config_link_value,
         )
     else:
+        max_devices_val = active.get("max_devices")
+        if max_devices_val in (None, 0):
+            max_devices_display = get_text("devices_unlimited_label")
+        else:
+            try:
+                max_devices_display = str(int(max_devices_val))
+            except (TypeError, ValueError):
+                max_devices_display = str(max_devices_val)
         text = get_text(
             "my_subscription_details",
             end_date=end_date.strftime("%Y-%m-%d") if end_date else "N/A",
             days_left=max(0, days_left),
             status=active.get("status_from_panel", get_text("status_active")).capitalize(),
             config_link=config_link_value,
+            max_devices=max_devices_display,
             traffic_limit=(f"{active['traffic_limit_bytes'] / 2**30:.2f} GB" if active.get("traffic_limit_bytes") else get_text("traffic_unlimited")),
             traffic_used=(
                 f"{active['traffic_used_bytes'] / 2**30:.2f} GB" if active.get("traffic_used_bytes") is not None else get_text("traffic_na")
