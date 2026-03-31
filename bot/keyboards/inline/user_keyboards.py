@@ -28,16 +28,16 @@ def get_main_menu_inline_keyboard(
         )
     )
 
-    promo_button = InlineKeyboardButton(
-        text=_(key="menu_apply_promo_button"),
-        callback_data="main_action:apply_promo")
+    info_button = InlineKeyboardButton(
+        text=_(key="menu_info_button"),
+        callback_data="main_action:info")
     if settings.REFERRAL_ENABLED:
         referral_button = InlineKeyboardButton(
             text=_(key="menu_referral_inline"),
             callback_data="main_action:referral")
-        builder.row(referral_button, promo_button)
+        builder.row(referral_button, info_button)
     else:
-        builder.row(promo_button)
+        builder.row(info_button)
 
     language_button = InlineKeyboardButton(
         text=_(key="menu_language_settings_inline"),
@@ -58,11 +58,24 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(text=_(key="menu_support_button"),
                                  url=settings.SUPPORT_LINK))
 
+    return builder.as_markup()
+
+
+def get_info_keyboard(lang: str, i18n_instance,
+                      settings: Settings) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    if settings.PRIVACY_POLICY_URL:
+        builder.row(
+            InlineKeyboardButton(text=_(key="menu_privacy_policy_button"),
+                                 url=settings.PRIVACY_POLICY_URL))
     if settings.TERMS_OF_SERVICE_URL:
         builder.row(
-            InlineKeyboardButton(text=_(key="menu_terms_button"),
+            InlineKeyboardButton(text=_(key="menu_terms_of_service_button"),
                                  url=settings.TERMS_OF_SERVICE_URL))
-
+    builder.row(
+        InlineKeyboardButton(text=_(key="back_to_main_menu_button"),
+                             callback_data="main_action:back_to_main"))
     return builder.as_markup()
 
 

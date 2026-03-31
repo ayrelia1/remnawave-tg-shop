@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import safe_edit_text
 from bot.services.stars_service import StarsService
 from config.settings import Settings
 
@@ -72,7 +73,7 @@ async def pay_stars_callback_handler(
 
     if payment_db_id:
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 get_text(
                     "payment_invoice_sent_message_traffic" if sale_mode == "traffic" else "payment_invoice_sent_message",
                     months=int(months),

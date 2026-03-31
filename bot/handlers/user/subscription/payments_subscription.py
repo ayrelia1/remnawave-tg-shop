@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline.user_keyboards import get_payment_method_keyboard
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import safe_edit_text
 from config.settings import Settings
 
 router = Router(name="user_subscription_payments_selection_router")
@@ -172,7 +173,7 @@ async def select_subscription_period_callback_handler(
     )
 
     try:
-        await callback.message.edit_text(text_content, reply_markup=reply_markup)
+        await safe_edit_text(callback.message, text_content, reply_markup=reply_markup)
     except Exception as e_edit:
         logging.warning(
             f"Edit message for payment method selection failed: {e_edit}. Sending new one."

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline.user_keyboards import get_payment_url_keyboard
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import safe_edit_text
 from bot.services.platega_service import PlategaService
 from config.settings import Settings
 from db.dal import payment_dal
@@ -43,7 +44,7 @@ async def pay_platega_callback_handler(
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_platega.py: %s", exc)
         try:
-            await callback.message.edit_text(get_text("payment_service_unavailable"))
+            await safe_edit_text(callback.message, get_text("payment_service_unavailable"))
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_platega.py: %s", exc)
         return
@@ -133,7 +134,7 @@ async def pay_platega_callback_handler(
             exc_info=True,
         )
         try:
-            await callback.message.edit_text(get_text("error_creating_payment_record"))
+            await safe_edit_text(callback.message, get_text("error_creating_payment_record"))
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_platega.py: %s", exc)
         try:
@@ -189,7 +190,7 @@ async def pay_platega_callback_handler(
                 )
 
             try:
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     get_text(
                         key="payment_link_message_traffic" if sale_mode == "traffic" else "payment_link_message",
                         months=int(months),
@@ -248,7 +249,7 @@ async def pay_platega_callback_handler(
         logging.error(f"Platega: failed to mark payment {payment_record.payment_id} as failed_creation: {e_status}", exc_info=True)
 
     try:
-        await callback.message.edit_text(get_text("error_payment_gateway"))
+        await safe_edit_text(callback.message, get_text("error_payment_gateway"))
     except Exception as exc:
         logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_platega.py: %s", exc)
     try:

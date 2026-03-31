@@ -15,6 +15,7 @@ from bot.keyboards.inline.user_keyboards import (
 )
 from bot.utils.config_link import prepare_config_links
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import safe_edit_text, edit_or_send_with_photo
 from .start import send_main_menu
 
 router = Router(name="user_trial_router")
@@ -45,11 +46,10 @@ async def request_trial_confirmation_handler(
             show_trial_btn_in_menu_if_fail = True
 
     if not settings.TRIAL_ENABLED:
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             _("trial_feature_disabled"),
-            reply_markup=get_main_menu_inline_keyboard(
-                current_lang, i18n, settings, False
-            ),
+            reply_markup=get_main_menu_inline_keyboard(current_lang, i18n, settings, False),
         )
         try:
             await callback.answer()
@@ -58,11 +58,10 @@ async def request_trial_confirmation_handler(
         return
 
     if await subscription_service.has_had_any_subscription(session, user_id):
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             _("trial_already_had_subscription_or_trial"),
-            reply_markup=get_main_menu_inline_keyboard(
-                current_lang, i18n, settings, False
-            ),
+            reply_markup=get_main_menu_inline_keyboard(current_lang, i18n, settings, False),
         )
         try:
             await callback.answer()
@@ -158,25 +157,14 @@ async def request_trial_confirmation_handler(
         )
     )
 
-    try:
-        await callback.message.edit_text(
+    if callback.message:
+        await safe_edit_text(
+            callback.message,
             final_message_text_in_chat,
-            parse_mode="HTML",
             reply_markup=reply_markup,
+            parse_mode="HTML",
             disable_web_page_preview=True,
         )
-    except Exception as e_edit:
-        logging.warning(
-            f"Could not edit trial result message: {e_edit}. Sending new one."
-        )
-
-        if callback.message:
-            await callback.message.answer(
-                final_message_text_in_chat,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-                disable_web_page_preview=True,
-            )
 
 
 @router.callback_query(F.data == "trial_action:confirm_activate")
@@ -298,25 +286,14 @@ async def confirm_activate_trial_handler(
         )
     )
 
-    try:
-        await callback.message.edit_text(
+    if callback.message:
+        await safe_edit_text(
+            callback.message,
             final_message_text_in_chat,
-            parse_mode="HTML",
             reply_markup=reply_markup,
+            parse_mode="HTML",
             disable_web_page_preview=True,
         )
-    except Exception as e_edit:
-        logging.warning(
-            f"Could not edit trial result message: {e_edit}. Sending new one."
-        )
-
-        if callback.message:
-            await callback.message.answer(
-                final_message_text_in_chat,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-                disable_web_page_preview=True,
-            )
 
     if activation_result and activation_result.get("activated") and end_date_obj:
         notification_service = NotificationService(callback.bot, settings, i18n)

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline.user_keyboards import get_payment_url_keyboard
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import safe_edit_text
 from bot.services.crypto_pay_service import CryptoPayService
 from config.settings import Settings
 
@@ -111,7 +112,7 @@ async def pay_crypto_callback_handler(
 
     if invoice_url:
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 get_text(
                     key="payment_link_message_traffic" if sale_mode == "traffic" else "payment_link_message",
                     months=int(months),

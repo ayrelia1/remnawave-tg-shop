@@ -11,6 +11,7 @@ from bot.keyboards.inline.user_keyboards import (
     get_yk_saved_cards_keyboard,
 )
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import safe_edit_text
 from bot.services.yookassa_service import YooKassaService
 from config.settings import Settings
 from db.dal import payment_dal, user_billing_dal, active_discount_dal
@@ -151,14 +152,14 @@ async def _initiate_yk_payment(
             exc_info=True,
         )
         try:
-            await callback.message.edit_text(get_text("error_creating_payment_record"))
+            await safe_edit_text(callback.message, get_text("error_creating_payment_record"))
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return False
 
     if not db_payment_record:
         try:
-            await callback.message.edit_text(get_text("error_creating_payment_record"))
+            await safe_edit_text(callback.message, get_text("error_creating_payment_record"))
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return False
@@ -252,13 +253,13 @@ async def _initiate_yk_payment(
                 exc_info=True,
             )
             try:
-                await callback.message.edit_text(get_text("error_payment_gateway_link_failed"))
+                await safe_edit_text(callback.message, get_text("error_payment_gateway_link_failed"))
             except Exception as exc:
                 logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
             return False
 
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 get_text(
                     key="payment_link_message_traffic" if sale_mode == "traffic" else "payment_link_message",
                     months=int(months),
@@ -321,14 +322,14 @@ async def _initiate_yk_payment(
                 exc_info=True,
             )
             try:
-                await callback.message.edit_text(get_text("error_payment_gateway"))
+                await safe_edit_text(callback.message, get_text("error_payment_gateway"))
             except Exception as exc:
                 logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
             return False
 
         message_text = get_text("yookassa_autopay_charge_initiated")
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 message_text,
                 reply_markup=get_back_to_main_menu_markup(current_lang, i18n),
             )
@@ -358,7 +359,7 @@ async def _initiate_yk_payment(
         f"Failed to create payment in YooKassa for user {user_id}, payment_db_id {db_payment_record.payment_id}. Response: {payment_response_yk}"
     )
     try:
-        await callback.message.edit_text(get_text("error_payment_gateway"))
+        await safe_edit_text(callback.message, get_text("error_payment_gateway"))
     except Exception as exc:
         logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
     return False
@@ -380,7 +381,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
     if not yookassa_service or not yookassa_service.configured:
         logging.error("YooKassa service is not configured or unavailable.")
         target_msg_edit = callback.message
-        await target_msg_edit.edit_text(get_text("payment_service_unavailable"))
+        await safe_edit_text(target_msg_edit, get_text("payment_service_unavailable"))
         try:
             await callback.answer(get_text("payment_service_unavailable_alert"), show_alert=True)
         except Exception as exc:
@@ -463,7 +464,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
 
     if autopay_enabled and saved_methods:
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 get_text("yookassa_autopay_flow_prompt"),
                 reply_markup=get_yk_autopay_choice_keyboard(
                     months,
@@ -539,7 +540,7 @@ async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Setti
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         try:
-            await callback.message.edit_text(get_text("payment_service_unavailable"))
+            await safe_edit_text(callback.message, get_text("payment_service_unavailable"))
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return
@@ -732,7 +733,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
 
     if not saved_methods:
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 get_text("yookassa_autopay_no_saved_cards"),
                 reply_markup=get_yk_autopay_choice_keyboard(
                     months,
@@ -777,7 +778,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
     page = max(0, min(page, max_page))
 
     try:
-        await callback.message.edit_text(
+        await safe_edit_text(callback.message, 
             get_text("yookassa_autopay_choose_saved_card"),
             reply_markup=get_yk_saved_cards_keyboard(
                 cards,
@@ -832,7 +833,7 @@ async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Sett
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         try:
-            await callback.message.edit_text(get_text("payment_service_unavailable"))
+            await safe_edit_text(callback.message, get_text("payment_service_unavailable"))
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return

@@ -16,7 +16,9 @@ from bot.keyboards.inline.user_keyboards import (
     get_main_menu_inline_keyboard,
     get_language_selection_keyboard,
     get_channel_subscription_keyboard,
+    get_info_keyboard,
 )
+from bot.utils.message_helpers import edit_or_send_with_photo, safe_edit_text
 from bot.services.subscription_service import SubscriptionService
 from bot.services.panel_api_service import PanelApiService
 from bot.services.referral_service import ReferralService
@@ -93,34 +95,20 @@ async def send_main_menu(target_event: Union[types.Message,
                                       show_alert=True)
         return
 
-    try:
-        if is_edit:
-            await target_message_obj.edit_text(text, reply_markup=reply_markup)
-        else:
-            await target_message_obj.answer(text, reply_markup=reply_markup)
+    bot = target_message_obj.bot
+    await edit_or_send_with_photo(
+        message=target_message_obj,
+        bot=bot,
+        caption=text,
+        reply_markup=reply_markup,
+        is_edit=is_edit,
+    )
 
-        if isinstance(target_event, types.CallbackQuery):
-            try:
-                await target_event.answer()
-            except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/start.py: %s", exc)
-    except Exception as e_send_edit:
-        logging.warning(
-            f"Failed to send/edit main menu (user: {user_id}, is_edit: {is_edit}): {type(e_send_edit).__name__} - {e_send_edit}."
-        )
-        if is_edit and target_message_obj:
-            try:
-                await target_message_obj.answer(text, reply_markup=reply_markup)
-            except Exception as e_send_new:
-                logging.error(
-                    f"Also failed to send new main menu message for user {user_id}: {e_send_new}"
-                )
-        if isinstance(target_event, types.CallbackQuery):
-            try:
-                await target_event.answer(
-                    _("error_occurred_try_again") if is_edit else None)
-            except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/start.py: %s", exc)
+    if isinstance(target_event, types.CallbackQuery):
+        try:
+            await target_event.answer()
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/start.py: %s", exc)
 
 
 async def ensure_required_channel_subscription(
@@ -285,14 +273,7 @@ async def ensure_required_channel_subscription(
 
     if isinstance(event, types.CallbackQuery):
         if keyboard and event.message:
-            try:
-                await event.message.edit_text(prompt_text, reply_markup=keyboard)
-            except Exception as edit_error:
-                logging.debug(
-                    "Failed to edit prompt message for user %s: %s",
-                    user_id,
-                    edit_error,
-                )
+            await safe_edit_text(event.message, prompt_text, reply_markup=keyboard)
         if keyboard is None and message_obj:
             try:
                 await message_obj.answer(prompt_text)
@@ -306,6 +287,41 @@ async def ensure_required_channel_subscription(
         await event.answer(prompt_text, reply_markup=keyboard)
 
     return False
+
+
+async def send_info_section(
+        event: Union[types.Message, types.CallbackQuery],
+        settings: Settings,
+        i18n_data: dict) -> None:
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    text = _(key="info_section_title")
+    reply_markup = get_info_keyboard(current_lang, i18n, settings)
+
+    target_message_obj: Optional[types.Message] = None
+    if isinstance(event, types.Message):
+        target_message_obj = event
+    elif isinstance(event, types.CallbackQuery) and event.message:
+        target_message_obj = event.message
+
+    if not target_message_obj:
+        return
+
+    await edit_or_send_with_photo(
+        message=target_message_obj,
+        bot=target_message_obj.bot,
+        caption=text,
+        reply_markup=reply_markup,
+        is_edit=isinstance(event, types.CallbackQuery),
+    )
+
+    if isinstance(event, types.CallbackQuery):
+        try:
+            await event.answer()
+        except Exception as exc:
+            logging.debug("Suppressed exception in send_info_section: %s", exc)
 
 
 @router.message(CommandStart())
@@ -602,15 +618,7 @@ async def verify_channel_subscription_callback(
         welcome_text = _(key="welcome",
                          user_name=hd.quote(callback.from_user.full_name))
         if callback.message:
-            try:
-                await callback.message.edit_text(welcome_text)
-            except Exception as welcome_edit_error:
-                logging.debug(
-                    "Failed to edit subscription prompt to welcome for user %s: %s",
-                    callback.from_user.id,
-                    welcome_edit_error,
-                )
-                await callback.message.answer(welcome_text)
+            await safe_edit_text(callback.message, welcome_text)
         else:
             fallback_bot: Optional[Bot] = getattr(callback, "bot", None)
             if fallback_bot:
@@ -662,16 +670,22 @@ async def language_command_handler(
 
     if isinstance(event, types.CallbackQuery):
         if event.message:
-            try:
-                await event.message.edit_text(text_to_send,
-                                              reply_markup=reply_markup)
-            except Exception:
-                await target_message_obj.answer(text_to_send,
-                                                reply_markup=reply_markup)
+            await edit_or_send_with_photo(
+                message=event.message,
+                bot=event.message.bot,
+                caption=text_to_send,
+                reply_markup=reply_markup,
+                is_edit=True,
+            )
         await event.answer()
     else:
-        await target_message_obj.answer(text_to_send,
-                                        reply_markup=reply_markup)
+        await edit_or_send_with_photo(
+            message=target_message_obj,
+            bot=target_message_obj.bot,
+            caption=text_to_send,
+            reply_markup=reply_markup,
+            is_edit=False,
+        )
 
 
 @router.callback_query(F.data.startswith("set_lang_"))
@@ -763,6 +777,8 @@ async def main_action_callback_handler(
     elif action == "apply_promo":
         await user_promo_handlers.prompt_promo_code_input(
             callback, state, i18n_data, settings, session)
+    elif action == "info":
+        await send_info_section(callback, settings, i18n_data)
     elif action == "request_trial":
         await user_trial_handlers.request_trial_confirmation_handler(
             callback, settings, i18n_data, subscription_service, session)

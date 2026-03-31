@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(ls -la /e/python/remnawave-tg-shop/bot/handlers/user/*.py)",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

@@ -18,6 +18,7 @@ from bot.keyboards.inline.user_keyboards import (
 from bot.services.subscription_service import SubscriptionService
 from bot.services.panel_api_service import PanelApiService
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import edit_or_send_with_photo, safe_edit_text
 from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
@@ -122,17 +123,18 @@ async def display_subscription_options(
                 logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         return
 
+    await edit_or_send_with_photo(
+        message=target_message_obj,
+        bot=target_message_obj.bot,
+        caption=text_content,
+        reply_markup=reply_markup,
+        is_edit=isinstance(event, types.CallbackQuery),
+    )
     if isinstance(event, types.CallbackQuery):
-        try:
-            await target_message_obj.edit_text(text_content, reply_markup=reply_markup)
-        except Exception:
-            await target_message_obj.answer(text_content, reply_markup=reply_markup)
         try:
             await event.answer()
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-    else:
-        await target_message_obj.answer(text_content, reply_markup=reply_markup)
 
 
 @router.callback_query(F.data == "main_action:subscribe")
@@ -188,12 +190,22 @@ async def my_subscription_command_handler(
                 await event.answer()
             except Exception as exc:
                 logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-            try:
-                await event.message.edit_text(text, reply_markup=kb)
-            except Exception:
-                await event.message.answer(text, reply_markup=kb)
+            if event.message:
+                await edit_or_send_with_photo(
+                    message=event.message,
+                    bot=event.message.bot,
+                    caption=text,
+                    reply_markup=kb,
+                    is_edit=True,
+                )
         else:
-            await event.answer(text, reply_markup=kb)
+            await edit_or_send_with_photo(
+                message=event,
+                bot=event.bot,
+                caption=text,
+                reply_markup=kb,
+                is_edit=False,
+            )
         return
 
     end_date = active.get("end_date")
@@ -351,18 +363,22 @@ async def my_subscription_command_handler(
             await event.answer()
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        try:
-            await event.message.edit_text(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
-        except Exception:
-            await bot.send_message(
-                chat_id=target.chat.id,
-                text=text,
+        if event.message:
+            await edit_or_send_with_photo(
+                message=event.message,
+                bot=event.message.bot,
+                caption=text,
                 reply_markup=markup,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
+                is_edit=True,
             )
     else:
-        await target.answer(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
+        await edit_or_send_with_photo(
+            message=target,
+            bot=target.bot,
+            caption=text,
+            reply_markup=markup,
+            is_edit=False,
+        )
 
 
 @router.callback_query(F.data == "main_action:my_devices")
@@ -477,12 +493,22 @@ async def my_devices_command_handler(
             await event.answer()
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        try:
-            await event.message.edit_text(text, reply_markup=markup)
-        except Exception:
-            await event.message.answer(text, reply_markup=markup)
+        if event.message:
+            await edit_or_send_with_photo(
+                message=event.message,
+                bot=event.message.bot,
+                caption=text,
+                reply_markup=markup,
+                is_edit=True,
+            )
     else:
-        await target.answer(text, reply_markup=markup)
+        await edit_or_send_with_photo(
+            message=target,
+            bot=target.bot,
+            caption=text,
+            reply_markup=markup,
+            is_edit=False,
+        )
 
 
 @router.callback_query(F.data.startswith("disconnect_device:"))
@@ -599,13 +625,8 @@ async def toggle_autorenew_handler(
     # Show confirmation popup and inline buttons
     confirm_text = get_text("autorenew_confirm_enable") if enable else get_text("autorenew_confirm_disable")
     kb = get_autorenew_confirm_keyboard(enable, sub.subscription_id, current_lang, i18n)
-    try:
-        await callback.message.edit_text(confirm_text, reply_markup=kb)
-    except Exception:
-        try:
-            await callback.message.answer(confirm_text, reply_markup=kb)
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+    if callback.message:
+        await safe_edit_text(callback.message, confirm_text, reply_markup=kb)
     try:
         await callback.answer()
     except Exception as exc:

@@ -9,6 +9,7 @@ from bot.services.referral_service import ReferralService
 
 from bot.keyboards.inline.user_keyboards import get_back_to_main_menu_markup
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.message_helpers import edit_or_send_with_photo
 
 router = Router(name="user_referral_router")
 
@@ -116,23 +117,20 @@ async def referral_command_handler(event: Union[types.Message,
     from bot.keyboards.inline.user_keyboards import get_referral_link_keyboard
     reply_markup_val = get_referral_link_keyboard(current_lang, i18n)
 
-    if isinstance(event, types.Message):
-        await event.answer(text,
-                           reply_markup=reply_markup_val,
-                           disable_web_page_preview=True)
-    elif isinstance(event, types.CallbackQuery) and event.message:
+    target_msg = event.message if isinstance(event, types.CallbackQuery) else event
+    if target_msg:
+        await edit_or_send_with_photo(
+            message=target_msg,
+            bot=target_msg.bot,
+            caption=text,
+            reply_markup=reply_markup_val,
+            is_edit=isinstance(event, types.CallbackQuery),
+        )
+    if isinstance(event, types.CallbackQuery):
         try:
-            await event.message.edit_text(text,
-                                          reply_markup=reply_markup_val,
-                                          disable_web_page_preview=True)
-        except Exception as e_edit:
-            logging.warning(
-                f"Failed to edit message for referral info: {e_edit}. Sending new one."
-            )
-            await event.message.answer(text,
-                                       reply_markup=reply_markup_val,
-                                       disable_web_page_preview=True)
-        await event.answer()
+            await event.answer()
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("referral_action:"))

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     SUPPORT_LINK: Optional[str] = Field(default=None)
     SERVER_STATUS_URL: Optional[str] = Field(default=None)
     TERMS_OF_SERVICE_URL: Optional[str] = Field(default=None)
+    PRIVACY_POLICY_URL: Optional[str] = Field(default=None)
     REQUIRED_CHANNEL_SUBSCRIBE_TO_USE: bool = Field(
         default=False,
         description="Require users to subscribe to REQUIRED_CHANNEL_ID before using the bot",
@@ -636,6 +637,7 @@ class Settings(BaseSettings):
         'CRYPT4_REDIRECT_URL',
         'TELEGRAM_WEBHOOK_SECRET',
         'PANEL_WEBHOOK_SECRET',
+        'PRIVACY_POLICY_URL',
         mode='before',
     )
     @classmethod
