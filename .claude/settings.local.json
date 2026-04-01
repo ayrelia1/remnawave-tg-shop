@@ -3,7 +3,9 @@
     "allow": [
       "Bash(xargs grep:*)",
       "Bash(ls -la /e/python/remnawave-tg-shop/bot/handlers/user/*.py)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(python:*)"
     ]
   }
 }

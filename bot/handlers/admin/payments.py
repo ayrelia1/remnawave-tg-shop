@@ -127,33 +127,50 @@ async def view_payments_handler(callback: types.CallbackQuery, i18n_data: dict,
     # Pagination buttons
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"payments_page:{page-1}"))
-    
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="⬅️",
+                callback_data=f"payments_page:{page-1}",
+                icon_custom_emoji_id="5258236805890710909",
+            )
+        )
+
     nav_buttons.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
-    
+
     if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"payments_page:{page+1}"))
-    
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=f"payments_page:{page+1}",
+                icon_custom_emoji_id="5258215850745275216",
+            )
+        )
+
     if nav_buttons:
         builder.row(*nav_buttons)
-    
+
     # Export and refresh buttons
     builder.row(
         InlineKeyboardButton(
-            text=_("admin_export_payments_csv"), 
-            callback_data="payments_export_csv"
+            text=_("admin_export_payments_csv"),
+            callback_data="payments_export_csv",
+            icon_custom_emoji_id="5258477770735885832",
         ),
         InlineKeyboardButton(
-            text=_("admin_refresh_payments"), 
-            callback_data=f"payments_page:{page}"
+            text=_("admin_refresh_payments"),
+            callback_data=f"payments_page:{page}",
+            icon_custom_emoji_id="5258420634785947640",
         )
     )
-    
+
     # Back button
-    builder.row(InlineKeyboardButton(
-        text=_("back_to_admin_panel_button"), 
-        callback_data="admin_section:stats_monitoring"
-    ))
+    builder.row(
+        InlineKeyboardButton(
+            text=_("back_to_admin_panel_button"),
+            callback_data="admin_section:stats_monitoring",
+            icon_custom_emoji_id="5258236805890710909",
+        )
+    )
 
     await callback.message.edit_text(
         "\n".join(text_parts),

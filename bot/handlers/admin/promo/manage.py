@@ -68,11 +68,11 @@ async def get_promo_detail_text_and_keyboard(promo_id: int, session: AsyncSessio
     ])
 
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text=_("admin_promo_edit_button"), callback_data=f"promo_edit_select:{promo_id}"))
-    builder.row(InlineKeyboardButton(text=_("admin_promo_toggle_status_button"), callback_data=f"promo_toggle:{promo_id}"))
-    builder.row(InlineKeyboardButton(text=_("admin_promo_view_activations_button"), callback_data=f"promo_activations:{promo_id}:0"))
-    builder.row(InlineKeyboardButton(text=_("admin_promo_delete_button"), callback_data=f"promo_delete:{promo_id}"))
-    builder.row(InlineKeyboardButton(text=_("admin_promo_back_to_list_button"), callback_data="admin_action:promo_management"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_edit_button"), callback_data=f"promo_edit_select:{promo_id}", icon_custom_emoji_id="5258331647358540449"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_toggle_status_button"), callback_data=f"promo_toggle:{promo_id}", icon_custom_emoji_id="5258420634785947640"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_view_activations_button"), callback_data=f"promo_activations:{promo_id}:0", icon_custom_emoji_id="5258477770735885832"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_delete_button"), callback_data=f"promo_delete:{promo_id}", icon_custom_emoji_id="5258130763148172425"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_back_to_list_button"), callback_data="admin_action:promo_management", icon_custom_emoji_id="5258236805890710909"))
 
     return text, builder.as_markup()
 
@@ -138,16 +138,16 @@ async def promo_management_handler(callback: types.CallbackQuery, i18n_data: dic
     if total_pages > 1:
         pagination_buttons = []
         if page > 0:
-            pagination_buttons.append(InlineKeyboardButton(text=_("prev_page_button"), callback_data=f"promo_management:{page-1}"))
+            pagination_buttons.append(InlineKeyboardButton(text=_("prev_page_button"), callback_data=f"promo_management:{page-1}", icon_custom_emoji_id="5258236805890710909"))
         if page < total_pages - 1:
-            pagination_buttons.append(InlineKeyboardButton(text=_("next_page_button"), callback_data=f"promo_management:{page+1}"))
+            pagination_buttons.append(InlineKeyboardButton(text=_("next_page_button"), callback_data=f"promo_management:{page+1}", icon_custom_emoji_id="5258215850745275216"))
         
         if pagination_buttons:
             builder.row(*pagination_buttons)
     
     # Добавляем кнопки экспорта и возврата
-    builder.row(InlineKeyboardButton(text=_("admin_promo_export_csv_button"), callback_data="promo_export_all"))
-    builder.row(InlineKeyboardButton(text=_("back_to_admin_panel_button"), callback_data="admin_action:main"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_export_csv_button"), callback_data="promo_export_all", icon_custom_emoji_id="5258477770735885832"))
+    builder.row(InlineKeyboardButton(text=_("back_to_admin_panel_button"), callback_data="admin_action:main", icon_custom_emoji_id="5258236805890710909"))
     
     # Формируем заголовок с информацией о страницах
     title = _("admin_promo_management_title")
@@ -246,14 +246,14 @@ async def promo_activations_handler(callback: types.CallbackQuery, i18n_data: di
 
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"promo_activations:{promo_id}:{page-1}"))
+            nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"promo_activations:{promo_id}:{page-1}", icon_custom_emoji_id="5258236805890710909"))
         if (page + 1) * page_size < total_activations:
-            nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"promo_activations:{promo_id}:{page+1}"))
+            nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"promo_activations:{promo_id}:{page+1}", icon_custom_emoji_id="5258215850745275216"))
         if nav_buttons:
             builder.row(*nav_buttons)
 
-        builder.row(InlineKeyboardButton(text=_("admin_promo_export_csv_button"), callback_data=f"promo_export:{promo_id}"))
-        builder.row(InlineKeyboardButton(text=_("admin_promo_back_to_detail_button"), callback_data=f"promo_detail:{promo_id}"))
+        builder.row(InlineKeyboardButton(text=_("admin_promo_export_csv_button"), callback_data=f"promo_export:{promo_id}", icon_custom_emoji_id="5258477770735885832"))
+        builder.row(InlineKeyboardButton(text=_("admin_promo_back_to_detail_button"), callback_data=f"promo_detail:{promo_id}", icon_custom_emoji_id="5258236805890710909"))
 
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     except (ValueError, IndexError):
@@ -415,13 +415,13 @@ async def promo_edit_select_handler(callback: types.CallbackQuery, i18n_data: di
     builder = InlineKeyboardBuilder()
     # Show appropriate edit option based on type
     if promo_type == "discount":
-        builder.row(InlineKeyboardButton(text=_("admin_promo_edit_discount_percentage"), callback_data=f"promo_edit_field:discount_percentage:{promo_id}"))
+        builder.row(InlineKeyboardButton(text=_("admin_promo_edit_discount_percentage"), callback_data=f"promo_edit_field:discount_percentage:{promo_id}", icon_custom_emoji_id="5258204546391351475"))
     else:
-        builder.row(InlineKeyboardButton(text=_("admin_promo_edit_bonus_days"), callback_data=f"promo_edit_field:bonus_days:{promo_id}"))
+        builder.row(InlineKeyboardButton(text=_("admin_promo_edit_bonus_days"), callback_data=f"promo_edit_field:bonus_days:{promo_id}", icon_custom_emoji_id="5359629206948976159"))
 
-    builder.row(InlineKeyboardButton(text=_("admin_promo_edit_max_activations"), callback_data=f"promo_edit_field:max_activations:{promo_id}"))
-    builder.row(InlineKeyboardButton(text=_("admin_promo_edit_validity"), callback_data=f"promo_edit_field:valid_until:{promo_id}"))
-    builder.row(InlineKeyboardButton(text=_("admin_promo_back_to_detail_button"), callback_data=f"promo_detail:{promo_id}"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_edit_max_activations"), callback_data=f"promo_edit_field:max_activations:{promo_id}", icon_custom_emoji_id="5226513232549664618"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_edit_validity"), callback_data=f"promo_edit_field:valid_until:{promo_id}", icon_custom_emoji_id="5258258882022612173"))
+    builder.row(InlineKeyboardButton(text=_("admin_promo_back_to_detail_button"), callback_data=f"promo_detail:{promo_id}", icon_custom_emoji_id="5258236805890710909"))
 
     await callback.message.edit_text(_("admin_promo_edit_select_field"), reply_markup=builder.as_markup())
     await callback.answer()

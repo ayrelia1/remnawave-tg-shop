@@ -38,19 +38,22 @@ async def create_promo_prompt_handler(callback: types.CallbackQuery,
     builder.row(
         InlineKeyboardButton(
             text=_("admin_promo_type_bonus_days"),
-            callback_data="promo_type_select:bonus_days"
+            callback_data="promo_type_select:bonus_days",
+            icon_custom_emoji_id="5359629206948976159",
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_("admin_promo_type_discount"),
-            callback_data="promo_type_select:discount"
+            callback_data="promo_type_select:discount",
+            icon_custom_emoji_id="5258204546391351475",
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_("admin_back_to_panel"),
-            callback_data="admin_action:main"
+            callback_data="admin_action:main",
+            icon_custom_emoji_id="5258236805890710909",
         )
     )
 
@@ -309,19 +312,22 @@ async def process_promo_max_activations_handler(message: types.Message,
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_promo_unlimited_validity"),
-                callback_data="promo_unlimited_validity"
+                callback_data="promo_unlimited_validity",
+                icon_custom_emoji_id="5271934788037517525",
             )
         )
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_promo_set_validity_days"),
-                callback_data="promo_set_validity"
+                callback_data="promo_set_validity",
+                icon_custom_emoji_id="5258258882022612173",
             )
         )
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_back_to_panel"),
-                callback_data="admin_action:main"
+                callback_data="admin_action:main",
+                icon_custom_emoji_id="5258236805890710909",
             )
         )
         

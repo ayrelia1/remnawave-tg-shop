@@ -69,6 +69,7 @@ class NotificationService:
                         "log_open_profile_link",
                     ),
                     url=f"tg://user?id={user_id}",
+                    icon_custom_emoji_id="5258362837411045098",
                 )
             ]
         ]
@@ -80,6 +81,7 @@ class NotificationService:
                         "log_open_referrer_profile_button",
                     ),
                     url=f"tg://user?id={referrer_id}",
+                    icon_custom_emoji_id="5258362837411045098",
                 )
             ])
 

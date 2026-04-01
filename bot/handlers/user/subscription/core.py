@@ -179,7 +179,9 @@ async def my_subscription_command_handler(
         text = get_text("subscription_not_active")
 
         buy_button = InlineKeyboardButton(
-            text=get_text("menu_subscribe_inline"), callback_data="main_action:subscribe"
+            text=get_text("menu_subscribe_inline"),
+            callback_data="main_action:subscribe",
+            icon_custom_emoji_id="5258152182150077732",
         )
         back_markup = get_back_to_main_menu_markup(current_lang, i18n)
 
@@ -280,6 +282,7 @@ async def my_subscription_command_handler(
                 InlineKeyboardButton(
                     text=get_text("connect_button"),
                     web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
+                    icon_custom_emoji_id="5260730055880876557",
                 )
             ])
         else:
@@ -289,6 +292,7 @@ async def my_subscription_command_handler(
                     InlineKeyboardButton(
                         text=get_text("connect_button"),
                         url=cfg_link_val,
+                        icon_custom_emoji_id="5260730055880876557",
                     )
                 ])
 

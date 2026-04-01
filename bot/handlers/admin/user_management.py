@@ -115,58 +115,68 @@ def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
     # Row 1: Trial and Subscription actions
     builder.button(
         text=_(key="admin_user_reset_trial_button"),
-        callback_data=f"user_action:reset_trial:{user_id}"
+        callback_data=f"user_action:reset_trial:{user_id}",
+        icon_custom_emoji_id="5258420634785947640",
     )
     builder.button(
         text=_(key="admin_user_add_subscription_button"),
-        callback_data=f"user_action:add_subscription:{user_id}"
+        callback_data=f"user_action:add_subscription:{user_id}",
+        icon_custom_emoji_id="5258108352008823107",
     )
-    
+
     # Row 2: Block/Unblock and Message
     builder.button(
         text=_(key="admin_user_toggle_ban_button"),
-        callback_data=f"user_action:toggle_ban:{user_id}"
+        callback_data=f"user_action:toggle_ban:{user_id}",
+        icon_custom_emoji_id="5275969776668134187",
     )
     builder.button(
         text=_(key="admin_user_send_message_button"),
-        callback_data=f"user_action:send_message:{user_id}"
+        callback_data=f"user_action:send_message:{user_id}",
     )
-    
+
     # Row 3: View actions
     builder.button(
         text=_(key="admin_user_view_logs_button"),
-        callback_data=f"user_action:view_logs:{user_id}"
+        callback_data=f"user_action:view_logs:{user_id}",
+        icon_custom_emoji_id="5258477770735885832",
     )
     builder.button(
         text=_(key="admin_user_refresh_button"),
-        callback_data=f"user_action:refresh:{user_id}"
+        callback_data=f"user_action:refresh:{user_id}",
+        icon_custom_emoji_id="5258420634785947640",
     )
 
     # Row 4: Quick links
     builder.button(
         text=_(key="user_card_open_profile_button"),
-        url=f"tg://user?id={user_id}"
+        url=f"tg://user?id={user_id}",
+        icon_custom_emoji_id="5258362837411045098",
     )
     if referrer_id:
         builder.button(
             text=_(key="user_card_open_referrer_profile_button"),
-            url=f"tg://user?id={referrer_id}"
+            url=f"tg://user?id={referrer_id}",
+            icon_custom_emoji_id="5258362837411045098",
         )
 
     # Row 5: Destructive action
     builder.button(
         text=_(key="admin_user_delete_button"),
-        callback_data=f"user_action:delete_user:{user_id}"
+        callback_data=f"user_action:delete_user:{user_id}",
+        icon_custom_emoji_id="5258226313285607065",
     )
-    
+
     # Row 6: Navigation
     builder.button(
         text=_(key="admin_user_search_new_button"),
-        callback_data="admin_action:users_management"
+        callback_data="admin_action:users_management",
+        icon_custom_emoji_id="5429571366384842791",
     )
     builder.button(
         text=_(key="back_to_admin_panel_button"),
-        callback_data="admin_action:main"
+        callback_data="admin_action:main",
+        icon_custom_emoji_id="5258236805890710909",
     )
     
     quick_links_width = 2 if referrer_id else 1
@@ -574,11 +584,13 @@ async def handle_view_user_logs(callback: types.CallbackQuery, user: User,
         builder = InlineKeyboardBuilder()
         builder.button(
             text=_(key="admin_user_view_all_logs_button"),
-            callback_data=f"admin_logs:view_user:{user.user_id}:0"
+            callback_data=f"admin_logs:view_user:{user.user_id}:0",
+            icon_custom_emoji_id="5258477770735885832",
         )
         builder.button(
             text=_(key="admin_user_back_to_card_button"),
-            callback_data=f"user_action:refresh:{user.user_id}"
+            callback_data=f"user_action:refresh:{user.user_id}",
+            icon_custom_emoji_id="5258236805890710909",
         )
         builder.adjust(1)
         
