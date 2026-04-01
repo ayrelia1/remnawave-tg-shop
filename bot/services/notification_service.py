@@ -23,11 +23,26 @@ from bot.utils.telegram_markup import (
 
 class NotificationService:
     """Enhanced notification service for sending messages to admins and log channels"""
-    
+
     def __init__(self, bot: Bot, settings: Settings, i18n: Optional[JsonI18n] = None):
         self.bot = bot
         self.settings = settings
         self.i18n = i18n
+
+    def _thread_id_for(self, category: str) -> Optional[int]:
+        """Return the appropriate thread ID for the given notification category.
+
+        Categories: 'users', 'purchases', 'statuses', 'backups'
+        Falls back to LOG_THREAD_ID if topic-specific ID is not set.
+        """
+        mapping = {
+            "users": self.settings.LOG_THREAD_ID_USERS,
+            "purchases": self.settings.LOG_THREAD_ID_PURCHASES,
+            "statuses": self.settings.LOG_THREAD_ID_STATUSES,
+            "backups": self.settings.LOG_THREAD_ID_BACKUPS,
+        }
+        specific = mapping.get(category)
+        return specific if specific is not None else self.settings.LOG_THREAD_ID
 
     @staticmethod
     def _format_user_display(
@@ -209,10 +224,10 @@ class NotificationService:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
-        # Send to log channel
+        # Send to log channel (users topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id, referred_by_id)
-        await self._send_to_log_channel(message, reply_markup=profile_keyboard)
-    
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("users"), reply_markup=profile_keyboard)
+
     async def notify_payment_received(self, user_id: int, amount: float, currency: str,
                                     months: int, payment_provider: str, 
                                     username: Optional[str] = None,
@@ -262,10 +277,10 @@ class NotificationService:
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             )
         
-        # Send to log channel
+        # Send to log channel (purchases topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id)
-        await self._send_to_log_channel(message, reply_markup=profile_keyboard)
-    
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("purchases"), reply_markup=profile_keyboard)
+
     async def notify_promo_activation(self, user_id: int, promo_code: str, bonus_days: int,
                                     username: Optional[str] = None):
         """Send notification about promo code activation"""
@@ -288,9 +303,9 @@ class NotificationService:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
-        # Send to log channel
+        # Send to log channel (purchases topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id)
-        await self._send_to_log_channel(message, reply_markup=profile_keyboard)
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("purchases"), reply_markup=profile_keyboard)
 
     async def notify_discount_promo_activation(self, user_id: int, promo_code: str, discount_percentage: int,
                                               username: Optional[str] = None):
@@ -314,10 +329,10 @@ class NotificationService:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
-        # Send to log channel
+        # Send to log channel (purchases topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id)
-        await self._send_to_log_channel(message, reply_markup=profile_keyboard)
-    
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("purchases"), reply_markup=profile_keyboard)
+
     async def notify_trial_activation(self, user_id: int, end_date: datetime,
                                     username: Optional[str] = None):
         """Send notification about trial activation"""
@@ -339,9 +354,9 @@ class NotificationService:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
         
-        # Send to log channel
+        # Send to log channel (users topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id)
-        await self._send_to_log_channel(message, reply_markup=profile_keyboard)
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("users"), reply_markup=profile_keyboard)
 
     async def notify_panel_sync(self, status: str, details: str, 
                                users_processed: int, subs_synced: int,
@@ -370,8 +385,8 @@ class NotificationService:
             details=details
         )
         
-        # Send to log channel
-        await self._send_to_log_channel(message)
+        # Send to log channel (statuses topic)
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("statuses"))
 
     async def notify_suspicious_promo_attempt(
             self, user_id: int, suspicious_input: str,
@@ -397,12 +412,54 @@ class NotificationService:
             suspicious_input=hd.quote(suspicious_input),
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z"))
 
-        # Send to log channel
+        # Send to log channel (statuses topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id)
-        await self._send_to_log_channel(message, reply_markup=profile_keyboard)
-    
-    async def send_custom_notification(self, message: str, to_admins: bool = False, 
-                                     to_log_channel: bool = True, thread_id: Optional[int] = None):
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("statuses"), reply_markup=profile_keyboard)
+
+    async def notify_node_down(self, node_name: str, node_address: str):
+        """Send alert when a Remnawave node goes offline."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        message = (
+            f"🔴 <b>Нода недоступна!</b>\n\n"
+            f"🖥 Нода: <b>{hd.quote(node_name)}</b>\n"
+            f"🌐 Адрес: <code>{hd.quote(node_address)}</code>\n"
+            f"🕐 Время: {timestamp}\n\n"
+            f"⚠️ Требуется немедленная проверка!"
+        )
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("statuses"))
+
+    async def notify_node_recovered(self, node_name: str, node_address: str):
+        """Send alert when a Remnawave node comes back online."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        message = (
+            f"🟢 <b>Нода восстановлена</b>\n\n"
+            f"🖥 Нода: <b>{hd.quote(node_name)}</b>\n"
+            f"🌐 Адрес: <code>{hd.quote(node_address)}</code>\n"
+            f"🕐 Время: {timestamp}"
+        )
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("statuses"))
+
+    async def notify_backup_complete(self, filename: str, size_bytes: int, success: bool, error: str = ""):
+        """Send notification about backup completion."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if success:
+            size_mb = size_bytes / (1024 * 1024)
+            message = (
+                f"💾 <b>Резервная копия создана</b>\n\n"
+                f"📁 Файл: <code>{hd.quote(filename)}</code>\n"
+                f"📦 Размер: <b>{size_mb:.2f} МБ</b>\n"
+                f"🕐 Время: {timestamp}"
+            )
+        else:
+            message = (
+                f"❌ <b>Ошибка создания резервной копии</b>\n\n"
+                f"📝 Ошибка: <code>{hd.quote(error)}</code>\n"
+                f"🕐 Время: {timestamp}"
+            )
+        await self._send_to_log_channel(message, thread_id=self._thread_id_for("backups"))
+
+    async def send_custom_notification(self, message: str, to_admins: bool = False,
+                                       to_log_channel: bool = True, thread_id: Optional[int] = None):
         """Send custom notification message"""
         if to_log_channel:
             await self._send_to_log_channel(message, thread_id)

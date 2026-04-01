@@ -654,6 +654,10 @@ class Settings(BaseSettings):
         'SEVERPAY_LIFETIME_MINUTES',
         'LOG_CHAT_ID',
         'LOG_THREAD_ID',
+        'LOG_THREAD_ID_USERS',
+        'LOG_THREAD_ID_PURCHASES',
+        'LOG_THREAD_ID_STATUSES',
+        'LOG_THREAD_ID_BACKUPS',
         'YOOKASSA_TAX_SYSTEM_CODE',
         mode='before'
     )
@@ -684,11 +688,37 @@ class Settings(BaseSettings):
         return v
     
     # Notification types
+    # Topic-specific thread IDs (override LOG_THREAD_ID per event category)
+    LOG_THREAD_ID_USERS: Optional[int] = Field(
+        default=None,
+        description="Topic thread ID for user events (registrations, trials)"
+    )
+    LOG_THREAD_ID_PURCHASES: Optional[int] = Field(
+        default=None,
+        description="Topic thread ID for purchases (payments, promo codes)"
+    )
+    LOG_THREAD_ID_STATUSES: Optional[int] = Field(
+        default=None,
+        description="Topic thread ID for statuses (panel sync, node alerts)"
+    )
+    LOG_THREAD_ID_BACKUPS: Optional[int] = Field(
+        default=None,
+        description="Topic thread ID for database backup reports"
+    )
+
     LOG_NEW_USERS: bool = Field(default=True, description="Send notifications for new user registrations")
     LOG_PAYMENTS: bool = Field(default=True, description="Send notifications for successful payments")
     LOG_PROMO_ACTIVATIONS: bool = Field(default=True, description="Send notifications for promo code activations")
     LOG_TRIAL_ACTIVATIONS: bool = Field(default=True, description="Send notifications for trial activations")
     LOG_SUSPICIOUS_ACTIVITY: bool = Field(default=True, description="Send notifications for suspicious promo attempts")
+
+    # Database backup settings
+    BACKUP_PASSWORD: str = Field(default="changeme", description="Password for encrypted backup archives")
+    BACKUP_HOUR: int = Field(default=9, description="Hour (local time) to run the daily database backup (0-23)")
+
+    # Node monitoring settings
+    NODE_MONITOR_ENABLED: bool = Field(default=True, description="Enable Remnawave node health monitoring")
+    NODE_MONITOR_INTERVAL_MINUTES: int = Field(default=5, description="How often (minutes) to check node health")
     DISCOUNT_PROMO_PAYMENT_TIMEOUT_MINUTES: int = Field(
         default=10,
         description="How long a discount promo reservation is kept before user payment",

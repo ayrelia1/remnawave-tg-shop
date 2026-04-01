@@ -16,6 +16,9 @@ from bot.services.freekassa_service import FreeKassaService
 from bot.services.platega_service import PlategaService
 from bot.services.severpay_service import SeverPayService
 from bot.services.lknpd_service import LknpdService
+from bot.services.notification_service import NotificationService
+from bot.services.backup_service import BackupService
+from bot.services.node_monitor_service import NodeMonitorService
 
 
 def build_core_services(
@@ -25,6 +28,7 @@ def build_core_services(
     i18n: JsonI18n,
     bot_username_for_default_return: str,
 ):
+    notification_service = NotificationService(bot, settings, i18n)
     panel_service = PanelApiService(settings)
     subscription_service = SubscriptionService(settings, panel_service, bot, i18n)
     referral_service = ReferralService(settings, subscription_service, bot, i18n)
@@ -80,6 +84,9 @@ def build_core_services(
         api_url=settings.LKNPD_API_URL,
     )
 
+    backup_service = BackupService(bot, settings, notification_service)
+    node_monitor_service = NodeMonitorService(settings, panel_service, notification_service)
+
     # Wire services that depend on each other
     try:
         # Allow subscription service to consume promo codes
@@ -104,4 +111,7 @@ def build_core_services(
         "lknpd_service": lknpd_service,
         "platega_service": platega_service,
         "severpay_service": severpay_service,
+        "notification_service": notification_service,
+        "backup_service": backup_service,
+        "node_monitor_service": node_monitor_service,
     }

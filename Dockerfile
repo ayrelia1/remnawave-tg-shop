@@ -10,7 +10,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM python:3.12-slim
 
 WORKDIR /app
- 
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 
 COPY . .

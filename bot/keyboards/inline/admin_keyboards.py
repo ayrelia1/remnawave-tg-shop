@@ -108,17 +108,21 @@ def get_promo_marketing_keyboard(i18n_instance, lang: str) -> InlineKeyboardMark
 def get_system_functions_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
-    
+
     builder.button(text=_(key="admin_broadcast_button"),
                    callback_data="admin_action:broadcast")
     builder.button(text=_(key="admin_sync_panel_button"),
                    callback_data="admin_action:sync_panel")
     builder.button(text=_(key="admin_queue_status_button"),
                    callback_data="admin_action:queue_status")
-    
+    builder.button(text=_(key="admin_backup_now_button"),
+                   callback_data="admin_action:backup_now")
+    builder.button(text=_(key="admin_check_nodes_button"),
+                   callback_data="admin_action:check_nodes")
+
     builder.button(text=_(key="back_to_admin_panel_button"),
                    callback_data="admin_action:main")
-    builder.adjust(2, 1, 1)
+    builder.adjust(2, 1, 2, 1)
     return builder.as_markup()
 
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
@@ -7,13 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
 from bot.keyboards.inline.admin_keyboards import (
-    get_admin_panel_keyboard, get_stats_monitoring_keyboard, 
+    get_admin_panel_keyboard, get_stats_monitoring_keyboard,
     get_user_management_keyboard, get_ban_management_keyboard,
-    get_promo_marketing_keyboard, get_system_functions_keyboard
+    get_promo_marketing_keyboard, get_system_functions_keyboard,
+    get_back_to_admin_panel_keyboard,
 )
 from bot.middlewares.i18n import JsonI18n
 from bot.services.panel_api_service import PanelApiService
 from bot.services.subscription_service import SubscriptionService
+from bot.services.backup_service import BackupService
+from bot.services.node_monitor_service import NodeMonitorService
 from bot.utils.message_queue import get_queue_manager
 
 from . import broadcast as admin_broadcast_handlers
@@ -53,7 +57,9 @@ async def admin_panel_command_handler(
 async def admin_panel_actions_callback_handler(
         callback: types.CallbackQuery, state: FSMContext, settings: Settings,
         i18n_data: dict, bot: Bot, panel_service: PanelApiService,
-        subscription_service: SubscriptionService, session: AsyncSession):
+        subscription_service: SubscriptionService, session: AsyncSession,
+        backup_service: Optional[BackupService] = None,
+        node_monitor_service: Optional[NodeMonitorService] = None):
     action_parts = callback.data.split(":")
     action = action_parts[1]
 
@@ -147,6 +153,18 @@ async def admin_panel_actions_callback_handler(
     elif action == "ads_create":
         from . import ads as admin_ads_handlers
         await admin_ads_handlers.ads_create_start(callback, state, settings, i18n_data)
+    elif action == "backup_now":
+        await callback.answer(_("admin_backup_starting"), show_alert=False)
+        if not backup_service:
+            await callback.message.answer("❌ BackupService не инициализирован.")
+            return
+        asyncio.create_task(_run_backup_and_notify(callback, backup_service, i18n, current_lang))
+    elif action == "check_nodes":
+        await callback.answer(_("admin_nodes_checking"), show_alert=False)
+        if not node_monitor_service:
+            await callback.message.answer("❌ NodeMonitorService не инициализирован.")
+            return
+        asyncio.create_task(_run_check_nodes_and_notify(callback, node_monitor_service, i18n, current_lang))
     elif action == "main":
         try:
             await callback.message.edit_text(
@@ -268,3 +286,41 @@ async def show_queue_status_handler(callback: types.CallbackQuery, i18n_data: di
     except Exception as e:
         logging.error(f"Error getting queue status: {e}")
         await callback.answer("❌ Ошибка получения статуса очередей", show_alert=True)
+
+
+async def _run_backup_and_notify(
+    callback: types.CallbackQuery,
+    backup_service: "BackupService",
+    i18n: Optional["JsonI18n"],
+    lang: str,
+):
+    """Run manual backup and send result to the admin."""
+    try:
+        await callback.message.answer("⏳ Создаю резервную копию БД, это может занять минуту...")
+        success = await backup_service.perform_backup()
+        if success:
+            await callback.message.answer("✅ Резервная копия успешно создана и отправлена в топик бэкапов.")
+        else:
+            await callback.message.answer("❌ Ошибка создания резервной копии. Проверьте логи.")
+    except Exception as e:
+        logging.error("Error in manual backup: %s", e, exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {e}")
+
+
+async def _run_check_nodes_and_notify(
+    callback: types.CallbackQuery,
+    node_monitor_service: "NodeMonitorService",
+    i18n: Optional["JsonI18n"],
+    lang: str,
+):
+    """Run manual node health check and show result to the admin."""
+    try:
+        result = await node_monitor_service.check_nodes()
+        if result is None:
+            await callback.message.answer("❌ Не удалось получить статус нод. Проверьте подключение к панели.")
+        else:
+            text = f"🔍 <b>Статус нод:</b>\n\n{result}"
+            await callback.message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        logging.error("Error in manual node check: %s", e, exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {e}")

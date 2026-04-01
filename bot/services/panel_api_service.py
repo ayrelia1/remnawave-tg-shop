@@ -594,6 +594,15 @@ class PanelApiService:
             return response_data.get("response")
         return None
 
+    async def get_nodes(self) -> Optional[List[Dict[str, Any]]]:
+        """Get list of all nodes with their current connection status"""
+        response_data = await self._request("GET", "/nodes", log_full_response=False)
+        if response_data and not response_data.get("error") and "response" in response_data:
+            resp = response_data.get("response")
+            if isinstance(resp, list):
+                return resp
+        return None
+
     async def encrypt_happ_link(self, link_to_encrypt: str) -> Optional[str]:
         """Encrypt a subscription link using the panel's happ crypt4 API.
 
