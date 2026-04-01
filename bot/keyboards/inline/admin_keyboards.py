@@ -7,6 +7,31 @@ from config.settings import Settings
 from bot.middlewares.i18n import JsonI18n
 from db.models import User
 
+from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_ADD,
+    PREMIUM_EMOJI_BACK,
+    PREMIUM_EMOJI_BAN,
+    PREMIUM_EMOJI_BOOKMARK,
+    PREMIUM_EMOJI_CANCEL,
+    PREMIUM_EMOJI_CLOCK_PANEL,
+    PREMIUM_EMOJI_COMPUTER,
+    PREMIUM_EMOJI_DELETE,
+    PREMIUM_EMOJI_DOCUMENT,
+    PREMIUM_EMOJI_MEGAPHONE,
+    PREMIUM_EMOJI_NEXT,
+    PREMIUM_EMOJI_NUMBERS,
+    PREMIUM_EMOJI_PACKAGE,
+    PREMIUM_EMOJI_PAY,
+    PREMIUM_EMOJI_REFRESH,
+    PREMIUM_EMOJI_REFERRAL,
+    PREMIUM_EMOJI_SEARCH,
+    PREMIUM_EMOJI_SETTINGS,
+    PREMIUM_EMOJI_STATS,
+    PREMIUM_EMOJI_TAG,
+    PREMIUM_EMOJI_USER,
+    PREMIUM_EMOJI_YES,
+)
+
 
 def get_admin_panel_keyboard(i18n_instance, lang: str,
                              settings: Settings) -> InlineKeyboardMarkup:
@@ -17,35 +42,35 @@ def get_admin_panel_keyboard(i18n_instance, lang: str,
     builder.button(
         text=_(key="admin_stats_and_monitoring_section"),
         callback_data="admin_section:stats_monitoring",
-        icon_custom_emoji_id="5258391025281408576",
+        icon_custom_emoji_id=PREMIUM_EMOJI_STATS,
     )
 
     # Управление пользователями
     builder.button(
         text=_(key="admin_user_management_section"),
         callback_data="admin_section:user_management",
-        icon_custom_emoji_id="5258513401784573443",
+        icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
     )
 
     # Промокоды и маркетинг
     builder.button(
         text=_(key="admin_promo_marketing_section"),
         callback_data="admin_section:promo_marketing",
-        icon_custom_emoji_id="5359629206948976159",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BOOKMARK,
     )
 
     # Реклама
     builder.button(
         text=_(key="admin_ads_section"),
         callback_data="admin_action:ads",
-        icon_custom_emoji_id="5258391025281408576",
+        icon_custom_emoji_id=PREMIUM_EMOJI_STATS,
     )
 
     # Системные функции
     builder.button(
         text=_(key="admin_system_functions_section"),
         callback_data="admin_section:system_functions",
-        icon_custom_emoji_id="5258096772776991776",
+        icon_custom_emoji_id=PREMIUM_EMOJI_SETTINGS,
     )
     
     builder.adjust(1)
@@ -59,23 +84,23 @@ def get_stats_monitoring_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
     builder.button(
         text=_(key="admin_stats_button"),
         callback_data="admin_action:stats",
-        icon_custom_emoji_id="5258391025281408576",
+        icon_custom_emoji_id=PREMIUM_EMOJI_STATS,
     )
     builder.button(
         text=_(key="admin_view_payments_button"),
         callback_data="admin_action:view_payments",
-        icon_custom_emoji_id="5258204546391351475",
+        icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
     )
     builder.button(
         text=_(key="admin_view_logs_menu_button"),
         callback_data="admin_action:view_logs_menu",
-        icon_custom_emoji_id="5258477770735885832",
+        icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
     )
 
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(2, 1, 1)
     return builder.as_markup()
@@ -88,23 +113,23 @@ def get_user_management_keyboard(i18n_instance, lang: str) -> InlineKeyboardMark
     builder.button(
         text=_(key="admin_users_management_button"),
         callback_data="admin_action:users_list:0",
-        icon_custom_emoji_id="5258513401784573443",
+        icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
     )
     builder.button(
         text=_(key="admin_users_search_button"),
         callback_data="admin_action:users_search_prompt",
-        icon_custom_emoji_id="5429571366384842791",
+        icon_custom_emoji_id=PREMIUM_EMOJI_SEARCH,
     )
     builder.button(
         text=_(key="admin_ban_management_section"),
         callback_data="admin_section:ban_management",
-        icon_custom_emoji_id="5275969776668134187",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BAN,
     )
 
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(2, 1, 1)
     return builder.as_markup()
@@ -117,23 +142,23 @@ def get_ban_management_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarku
     builder.button(
         text=_(key="admin_ban_user_button"),
         callback_data="admin_action:ban_user_prompt",
-        icon_custom_emoji_id="5275969776668134187",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BAN,
     )
     builder.button(
         text=_(key="admin_unban_user_button"),
         callback_data="admin_action:unban_user_prompt",
-        icon_custom_emoji_id="5260416304224936047",
+        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
     )
     builder.button(
         text=_(key="admin_view_banned_users_button"),
         callback_data="admin_action:view_banned:0",
-        icon_custom_emoji_id="5258477770735885832",
+        icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
     )
 
     builder.button(
         text=_(key="back_to_user_management_button"),
         callback_data="admin_section:user_management",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(2, 1, 1)
     return builder.as_markup()
@@ -146,23 +171,23 @@ def get_promo_marketing_keyboard(i18n_instance, lang: str) -> InlineKeyboardMark
     builder.button(
         text=_(key="admin_create_promo_button"),
         callback_data="admin_action:create_promo",
-        icon_custom_emoji_id="5359629206948976159",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BOOKMARK,
     )
     builder.button(
         text=_(key="admin_create_bulk_promo_button"),
         callback_data="admin_action:create_bulk_promo",
-        icon_custom_emoji_id="5258134813302332906",
+        icon_custom_emoji_id=PREMIUM_EMOJI_PACKAGE,
     )
     builder.button(
         text=_(key="admin_promo_management_button"),
         callback_data="admin_action:promo_management",
-        icon_custom_emoji_id="5359629206948976159",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BOOKMARK,
     )
 
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(2, 1, 1)
     return builder.as_markup()
@@ -175,33 +200,33 @@ def get_system_functions_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
     builder.button(
         text=_(key="admin_broadcast_button"),
         callback_data="admin_action:broadcast",
-        icon_custom_emoji_id="5260268501515377807",
+        icon_custom_emoji_id=PREMIUM_EMOJI_MEGAPHONE,
     )
     builder.button(
         text=_(key="admin_sync_panel_button"),
         callback_data="admin_action:sync_panel",
-        icon_custom_emoji_id="5258420634785947640",
+        icon_custom_emoji_id=PREMIUM_EMOJI_REFRESH,
     )
     builder.button(
         text=_(key="admin_queue_status_button"),
         callback_data="admin_action:queue_status",
-        icon_custom_emoji_id="5258391025281408576",
+        icon_custom_emoji_id=PREMIUM_EMOJI_STATS,
     )
     builder.button(
         text=_(key="admin_backup_now_button"),
         callback_data="admin_action:backup_now",
-        icon_custom_emoji_id="5258423306255604960",
+        icon_custom_emoji_id=PREMIUM_EMOJI_COMPUTER,
     )
     builder.button(
         text=_(key="admin_check_nodes_button"),
         callback_data="admin_action:check_nodes",
-        icon_custom_emoji_id="5429571366384842791",
+        icon_custom_emoji_id=PREMIUM_EMOJI_SEARCH,
     )
 
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(2, 1, 2, 1)
     return builder.as_markup()
@@ -213,12 +238,12 @@ def get_ads_menu_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
     builder.button(
         text=_(key="admin_ads_create_button"),
         callback_data="admin_action:ads_create",
-        icon_custom_emoji_id="5258108352008823107",
+        icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
     )
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -239,6 +264,7 @@ def get_ads_list_keyboard(
         builder.button(
             text=title,
             callback_data=f"admin_ads:card:{c.ad_campaign_id}:{current_page}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_TAG,
         )
 
     # Pagination row (only when needed)
@@ -249,13 +275,14 @@ def get_ads_list_keyboard(
                 InlineKeyboardButton(
                     text=_("prev_page_button"),
                     callback_data=f"admin_ads:page:{current_page - 1}",
-                    icon_custom_emoji_id="5258236805890710909",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
                 )
             )
         row.append(
             InlineKeyboardButton(
                 text=f"{current_page + 1}/{total_pages}",
                 callback_data="ads_page_display",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NUMBERS,
             )
         )
         if current_page < total_pages - 1:
@@ -263,7 +290,7 @@ def get_ads_list_keyboard(
                 InlineKeyboardButton(
                     text=_("next_page_button"),
                     callback_data=f"admin_ads:page:{current_page + 1}",
-                    icon_custom_emoji_id="5258215850745275216",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
                 )
             )
         if row:
@@ -272,12 +299,12 @@ def get_ads_list_keyboard(
     builder.button(
         text=_(key="admin_ads_create_button"),
         callback_data="admin_action:ads_create",
-        icon_custom_emoji_id="5258108352008823107",
+        icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
     )
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -290,17 +317,17 @@ def get_ad_card_keyboard(i18n_instance, lang: str, campaign_id: int, back_page: 
     builder.button(
         text=_(key="admin_ads_delete_button"),
         callback_data=f"admin_ads:delete:{campaign_id}:{back_page}",
-        icon_custom_emoji_id="5258130763148172425",
+        icon_custom_emoji_id=PREMIUM_EMOJI_DELETE,
     )
     builder.button(
         text=_(key="back_to_ads_list_button"),
         callback_data=f"admin_ads:page:{back_page}",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -312,23 +339,23 @@ def get_logs_menu_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
     builder.button(
         text=_(key="admin_view_all_logs_button"),
         callback_data="admin_logs:view_all:0",
-        icon_custom_emoji_id="5258477770735885832",
+        icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
     )
     builder.button(
         text=_(key="admin_view_user_logs_prompt_button"),
         callback_data="admin_logs:prompt_user",
-        icon_custom_emoji_id="5258362837411045098",
+        icon_custom_emoji_id=PREMIUM_EMOJI_USER,
     )
     builder.button(
         text=_(key="admin_export_logs_csv_button"),
         callback_data="admin_logs:export_csv",
-        icon_custom_emoji_id="5258477770735885832",
+        icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_admin_panel_button"),
             callback_data="admin_action:main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     builder.adjust(2, 1, 1)
@@ -350,7 +377,7 @@ def get_logs_pagination_keyboard(
             InlineKeyboardButton(
                 text=_("prev_page_button"),
                 callback_data=f"{base_callback_data}:{current_page - 1}",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
     if current_page < total_pages - 1:
@@ -358,7 +385,7 @@ def get_logs_pagination_keyboard(
             InlineKeyboardButton(
                 text=_("next_page_button"),
                 callback_data=f"{base_callback_data}:{current_page + 1}",
-                icon_custom_emoji_id="5258215850745275216",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
             )
         )
 
@@ -370,6 +397,7 @@ def get_logs_pagination_keyboard(
             InlineKeyboardButton(
                 text=_(key="admin_logs_menu_title"),
                 callback_data="admin_action:view_logs_menu",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
     else:
@@ -377,7 +405,7 @@ def get_logs_pagination_keyboard(
             InlineKeyboardButton(
                 text=_(key="back_to_admin_panel_button"),
                 callback_data="admin_action:main",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
     return builder.as_markup()
@@ -413,7 +441,9 @@ def get_banned_users_keyboard(banned_users: List[User], current_page: int,
             InlineKeyboardButton(
                 text=button_text,
                 callback_data=
-                f"admin_user_card:{user_row.user_id}:{current_page}"))
+                f"admin_user_card:{user_row.user_id}:{current_page}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_USER,
+            ))
 
     if total_banned > page_size:
         total_pages = math.ceil(total_banned / page_size)
@@ -423,13 +453,14 @@ def get_banned_users_keyboard(banned_users: List[User], current_page: int,
                 InlineKeyboardButton(
                     text=_("prev_page_button"),
                     callback_data=f"admin_action:view_banned:{current_page - 1}",
-                    icon_custom_emoji_id="5258236805890710909",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
                 )
             )
         pagination_buttons.append(
             InlineKeyboardButton(
                 text=f"{current_page + 1}/{total_pages}",
                 callback_data="stub_page_display",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NUMBERS,
             )
         )
         if current_page < total_pages - 1:
@@ -437,7 +468,7 @@ def get_banned_users_keyboard(banned_users: List[User], current_page: int,
                 InlineKeyboardButton(
                     text=_("next_page_button"),
                     callback_data=f"admin_action:view_banned:{current_page + 1}",
-                    icon_custom_emoji_id="5258215850745275216",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
                 )
             )
         if pagination_buttons:
@@ -447,7 +478,7 @@ def get_banned_users_keyboard(banned_users: List[User], current_page: int,
         InlineKeyboardButton(
             text=_("back_to_admin_panel_button"),
             callback_data="admin_action:main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -473,7 +504,8 @@ def get_users_list_keyboard(users: List[User], current_page: int,
         builder.row(
             InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"admin_user_card_from_list:{user.user_id}:{current_page}"
+                callback_data=f"admin_user_card_from_list:{user.user_id}:{current_page}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_USER,
             )
         )
     
@@ -486,13 +518,14 @@ def get_users_list_keyboard(users: List[User], current_page: int,
                 InlineKeyboardButton(
                     text=_("prev_page_button"),
                     callback_data=f"admin_action:users_list:{current_page - 1}",
-                    icon_custom_emoji_id="5258236805890710909",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
                 )
             )
         pagination_buttons.append(
             InlineKeyboardButton(
                 text=f"{current_page + 1}/{total_pages}",
                 callback_data="stub_page_display",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NUMBERS,
             )
         )
         if current_page < total_pages - 1:
@@ -500,7 +533,7 @@ def get_users_list_keyboard(users: List[User], current_page: int,
                 InlineKeyboardButton(
                     text=_("next_page_button"),
                     callback_data=f"admin_action:users_list:{current_page + 1}",
-                    icon_custom_emoji_id="5258215850745275216",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
                 )
             )
         if pagination_buttons:
@@ -511,7 +544,7 @@ def get_users_list_keyboard(users: List[User], current_page: int,
         InlineKeyboardButton(
             text=_("back_to_user_management_button"),
             callback_data="admin_section:user_management",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     
@@ -529,28 +562,28 @@ def get_user_card_keyboard(user_id: int,
         builder.button(
             text=_(key="user_card_unban_button"),
             callback_data=f"admin_unban_confirm:{user_id}:{banned_list_page}",
-            icon_custom_emoji_id="5260416304224936047",
+            icon_custom_emoji_id=PREMIUM_EMOJI_YES,
         )
     else:
         builder.button(
             text=_(key="user_card_ban_button"),
             callback_data=f"admin_ban_confirm:{user_id}:{banned_list_page}",
-            icon_custom_emoji_id="5275969776668134187",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BAN,
         )
     builder.button(
         text=_(key="user_card_open_profile_button"),
         url=f"tg://user?id={user_id}",
-        icon_custom_emoji_id="5258362837411045098",
+        icon_custom_emoji_id=PREMIUM_EMOJI_USER,
     )
     builder.button(
         text=_(key="user_card_back_to_banned_list_button"),
         callback_data=f"admin_action:view_banned:{banned_list_page}",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -561,8 +594,16 @@ def get_confirmation_keyboard(yes_callback_data: str, no_callback_data: str,
                               lang: str) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
-    builder.button(text=_(key="yes_button"), callback_data=yes_callback_data)
-    builder.button(text=_(key="no_button"), callback_data=no_callback_data)
+    builder.button(
+        text=_(key="yes_button"),
+        callback_data=yes_callback_data,
+        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
+    )
+    builder.button(
+        text=_(key="no_button"),
+        callback_data=no_callback_data,
+        icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
+    )
     return builder.as_markup()
 
 
@@ -590,17 +631,17 @@ def get_broadcast_confirmation_keyboard(lang: str,
     builder.button(
         text=mark_selected(target_all_label, target == "all"),
         callback_data="broadcast_target:all",
-        icon_custom_emoji_id="5258513401784573443",
+        icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
     )
     builder.button(
         text=mark_selected(target_active_label, target == "active"),
         callback_data="broadcast_target:active",
-        icon_custom_emoji_id="5260416304224936047",
+        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
     )
     builder.button(
         text=mark_selected(target_inactive_label, target == "inactive"),
         callback_data="broadcast_target:inactive",
-        icon_custom_emoji_id="5258419835922030550",
+        icon_custom_emoji_id=PREMIUM_EMOJI_CLOCK_PANEL,
     )
     builder.adjust(3)
 
@@ -608,12 +649,12 @@ def get_broadcast_confirmation_keyboard(lang: str,
     builder.button(
         text=_(key="confirm_broadcast_send_button"),
         callback_data="broadcast_final_action:send",
-        icon_custom_emoji_id="5260416304224936047",
+        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
     )
     builder.button(
         text=_(key="cancel_broadcast_button"),
         callback_data="broadcast_final_action:cancel",
-        icon_custom_emoji_id="5258226313285607065",
+        icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
     )
     builder.adjust(2)
     return builder.as_markup()
@@ -626,6 +667,6 @@ def get_back_to_admin_panel_keyboard(lang: str,
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     return builder.as_markup()

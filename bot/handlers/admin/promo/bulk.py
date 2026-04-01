@@ -17,6 +17,12 @@ from bot.keyboards.inline.admin_keyboards import get_back_to_admin_panel_keyboar
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from bot.middlewares.i18n import JsonI18n
 
+from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_BACK,
+    PREMIUM_EMOJI_INFINITY,
+    PREMIUM_EMOJI_TIMER,
+)
+
 router = Router(name="promo_bulk_router")
 
 
@@ -189,21 +195,21 @@ async def process_bulk_promo_max_activations_handler(message: types.Message,
             InlineKeyboardButton(
                 text=_("admin_promo_unlimited_validity"),
                 callback_data="bulk_promo_unlimited_validity",
-                icon_custom_emoji_id="5271934788037517525",
+                icon_custom_emoji_id=PREMIUM_EMOJI_INFINITY,
             )
         )
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_promo_set_validity_days"),
                 callback_data="bulk_promo_set_validity",
-                icon_custom_emoji_id="5258258882022612173",
+                icon_custom_emoji_id=PREMIUM_EMOJI_TIMER,
             )
         )
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_back_to_panel"),
                 callback_data="admin_action:main",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
         

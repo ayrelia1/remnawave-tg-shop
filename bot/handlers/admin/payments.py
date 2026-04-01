@@ -15,6 +15,14 @@ from bot.keyboards.inline.admin_keyboards import get_back_to_admin_panel_keyboar
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from bot.middlewares.i18n import JsonI18n
 
+from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_BACK,
+    PREMIUM_EMOJI_DOCUMENT,
+    PREMIUM_EMOJI_NEXT,
+    PREMIUM_EMOJI_NUMBERS,
+    PREMIUM_EMOJI_REFRESH,
+)
+
 router = Router(name="admin_payments_router")
 
 
@@ -131,18 +139,24 @@ async def view_payments_handler(callback: types.CallbackQuery, i18n_data: dict,
             InlineKeyboardButton(
                 text="⬅️",
                 callback_data=f"payments_page:{page-1}",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
 
-    nav_buttons.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+    nav_buttons.append(
+        InlineKeyboardButton(
+            text=f"{page + 1}/{total_pages}",
+            callback_data="noop",
+            icon_custom_emoji_id=PREMIUM_EMOJI_NUMBERS,
+        )
+    )
 
     if page < total_pages - 1:
         nav_buttons.append(
             InlineKeyboardButton(
                 text="➡️",
                 callback_data=f"payments_page:{page+1}",
-                icon_custom_emoji_id="5258215850745275216",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
             )
         )
 
@@ -154,12 +168,12 @@ async def view_payments_handler(callback: types.CallbackQuery, i18n_data: dict,
         InlineKeyboardButton(
             text=_("admin_export_payments_csv"),
             callback_data="payments_export_csv",
-            icon_custom_emoji_id="5258477770735885832",
+            icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
         ),
         InlineKeyboardButton(
             text=_("admin_refresh_payments"),
             callback_data=f"payments_page:{page}",
-            icon_custom_emoji_id="5258420634785947640",
+            icon_custom_emoji_id=PREMIUM_EMOJI_REFRESH,
         )
     )
 
@@ -168,7 +182,7 @@ async def view_payments_handler(callback: types.CallbackQuery, i18n_data: dict,
         InlineKeyboardButton(
             text=_("back_to_admin_panel_button"),
             callback_data="admin_section:stats_monitoring",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
 

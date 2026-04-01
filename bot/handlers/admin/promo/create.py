@@ -13,6 +13,14 @@ from bot.keyboards.inline.admin_keyboards import get_back_to_admin_panel_keyboar
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from bot.middlewares.i18n import JsonI18n
 
+from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_BACK,
+    PREMIUM_EMOJI_BOOKMARK,
+    PREMIUM_EMOJI_INFINITY,
+    PREMIUM_EMOJI_PAY,
+    PREMIUM_EMOJI_TIMER,
+)
+
 router = Router(name="promo_create_router")
 
 
@@ -39,21 +47,21 @@ async def create_promo_prompt_handler(callback: types.CallbackQuery,
         InlineKeyboardButton(
             text=_("admin_promo_type_bonus_days"),
             callback_data="promo_type_select:bonus_days",
-            icon_custom_emoji_id="5359629206948976159",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BOOKMARK,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_("admin_promo_type_discount"),
             callback_data="promo_type_select:discount",
-            icon_custom_emoji_id="5258204546391351475",
+            icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_("admin_back_to_panel"),
             callback_data="admin_action:main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
 
@@ -313,21 +321,21 @@ async def process_promo_max_activations_handler(message: types.Message,
             InlineKeyboardButton(
                 text=_("admin_promo_unlimited_validity"),
                 callback_data="promo_unlimited_validity",
-                icon_custom_emoji_id="5271934788037517525",
+                icon_custom_emoji_id=PREMIUM_EMOJI_INFINITY,
             )
         )
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_promo_set_validity_days"),
                 callback_data="promo_set_validity",
-                icon_custom_emoji_id="5258258882022612173",
+                icon_custom_emoji_id=PREMIUM_EMOJI_TIMER,
             )
         )
         builder.row(
             InlineKeyboardButton(
                 text=_("admin_back_to_panel"),
                 callback_data="admin_action:main",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
         

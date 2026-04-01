@@ -9,6 +9,7 @@ from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
 from bot.services.stars_service import StarsService
 from config.settings import Settings
+from bot.constants.premium_emoji import PREMIUM_EMOJI_BACK, PREMIUM_EMOJI_CANCEL
 
 router = Router(name="user_subscription_payments_stars_router")
 
@@ -85,12 +86,14 @@ async def pay_stars_callback_handler(
                             InlineKeyboardButton(
                                 text=get_text("back_to_payment_methods_button"),
                                 callback_data=f"subscribe_period:{human_value}",
+                                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
                             )
                         ],
                         [
                             InlineKeyboardButton(
                                 text=get_text("cancel_button"),
                                 callback_data="main_action:subscribe",
+                                icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
                             )
                         ],
                     ]

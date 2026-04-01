@@ -19,6 +19,7 @@ from bot.services.subscription_service import SubscriptionService
 from bot.services.backup_service import BackupService
 from bot.services.node_monitor_service import NodeMonitorService
 from bot.utils.message_queue import get_queue_manager
+from bot.constants.premium_emoji import PREMIUM_EMOJI_BACK
 
 from . import broadcast as admin_broadcast_handlers
 from .promo import create as admin_promo_create_handlers
@@ -255,7 +256,8 @@ async def show_queue_status_handler(callback: types.CallbackQuery, i18n_data: di
             "❌ Система очередей не инициализирована",
             reply_markup=InlineKeyboardBuilder().button(
                 text=_("back_to_admin_panel_button"),
-                callback_data="admin_action:main"
+                callback_data="admin_action:main",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             ).as_markup()
         )
         await callback.answer()

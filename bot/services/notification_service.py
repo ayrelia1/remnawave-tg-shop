@@ -19,6 +19,7 @@ from bot.utils.telegram_markup import (
     is_profile_link_error,
     remove_profile_link_buttons,
 )
+from bot.constants.premium_emoji import PREMIUM_EMOJI_USER
 
 
 class NotificationService:
@@ -69,7 +70,7 @@ class NotificationService:
                         "log_open_profile_link",
                     ),
                     url=f"tg://user?id={user_id}",
-                    icon_custom_emoji_id="5258362837411045098",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_USER,
                 )
             ]
         ]
@@ -81,7 +82,7 @@ class NotificationService:
                         "log_open_referrer_profile_button",
                     ),
                     url=f"tg://user?id={referrer_id}",
-                    icon_custom_emoji_id="5258362837411045098",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_USER,
                 )
             ])
 

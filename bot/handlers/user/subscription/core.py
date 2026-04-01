@@ -22,6 +22,15 @@ from bot.utils.message_helpers import edit_or_send_with_photo, safe_edit_text
 from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
+from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_COIN,
+    PREMIUM_EMOJI_COMPUTER,
+    PREMIUM_EMOJI_CONNECT,
+    PREMIUM_EMOJI_HAND_STOP,
+    PREMIUM_EMOJI_REFRESH,
+    PREMIUM_EMOJI_SUBSCRIBE,
+)
+
 router = Router(name="user_subscription_core_router")
 
 
@@ -181,7 +190,7 @@ async def my_subscription_command_handler(
         buy_button = InlineKeyboardButton(
             text=get_text("menu_subscribe_inline"),
             callback_data="main_action:subscribe",
-            icon_custom_emoji_id="5258152182150077732",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
         )
         back_markup = get_back_to_main_menu_markup(current_lang, i18n)
 
@@ -282,7 +291,7 @@ async def my_subscription_command_handler(
                 InlineKeyboardButton(
                     text=get_text("connect_button"),
                     web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                    icon_custom_emoji_id="5260730055880876557",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
                 )
             ])
         else:
@@ -292,7 +301,7 @@ async def my_subscription_command_handler(
                     InlineKeyboardButton(
                         text=get_text("connect_button"),
                         url=cfg_link_val,
-                        icon_custom_emoji_id="5260730055880876557",
+                        icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
                     )
                 ])
 
@@ -344,6 +353,7 @@ async def my_subscription_command_handler(
                 InlineKeyboardButton(
                     text=devices_button_text,
                     callback_data="main_action:my_devices",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_COMPUTER,
                 )
             ])
 
@@ -356,13 +366,18 @@ async def my_subscription_command_handler(
                 InlineKeyboardButton(
                     text=toggle_text,
                     callback_data=f"toggle_autorenew:{local_sub.subscription_id}:{1 if not local_sub.auto_renew_enabled else 0}",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_REFRESH,
                 )
             ])
 
         # 3) Payment methods management (when autopayments enabled)
         if not traffic_mode and settings.yookassa_autopayments_active:
             prepend_rows.append([
-                InlineKeyboardButton(text=get_text("payment_methods_manage_button"), callback_data="pm:manage")
+                InlineKeyboardButton(
+                    text=get_text("payment_methods_manage_button"),
+                    callback_data="pm:manage",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
+                )
             ])
 
         if prepend_rows:
@@ -497,7 +512,15 @@ async def my_devices_command_handler(
         device_button_text = get_text("disconnect_device_button", hwid=_shorten_hwid_for_display(hwid), index=index)
         hwid_token = _hwid_callback_token(hwid)
 
-        devices_kb.append([InlineKeyboardButton(text=device_button_text, callback_data=f"disconnect_device:{hwid_token}")])
+        devices_kb.append(
+            [
+                InlineKeyboardButton(
+                    text=device_button_text,
+                    callback_data=f"disconnect_device:{hwid_token}",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_HAND_STOP,
+                )
+            ]
+        )
     kb = devices_kb + kb
     markup = InlineKeyboardMarkup(inline_keyboard=kb)
 

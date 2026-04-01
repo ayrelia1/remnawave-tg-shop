@@ -11,6 +11,7 @@ from db.dal import user_dal
 
 from .i18n import JsonI18n
 from ..keyboards.inline.user_keyboards import get_user_banned_keyboard
+from bot.constants.premium_emoji import PREMIUM_EMOJI_SUPPORT
 
 
 class BanCheckMiddleware(BaseMiddleware):
@@ -64,7 +65,11 @@ class BanCheckMiddleware(BaseMiddleware):
             elif self.settings.SUPPORT_LINK:
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 builder = InlineKeyboardBuilder()
-                builder.button(text="Support", url=self.settings.SUPPORT_LINK)
+                builder.button(
+                    text="Support",
+                    url=self.settings.SUPPORT_LINK,
+                    icon_custom_emoji_id=PREMIUM_EMOJI_SUPPORT,
+                )
                 keyboard = builder.as_markup()
 
             actual_event_object: Optional[Union[Message, CallbackQuery]] = None

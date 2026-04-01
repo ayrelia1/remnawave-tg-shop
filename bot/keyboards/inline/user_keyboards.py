@@ -4,6 +4,32 @@ from typing import Dict, Optional, List, Tuple
 
 from config.settings import Settings
 
+from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_ADD,
+    PREMIUM_EMOJI_BACK,
+    PREMIUM_EMOJI_BAN,
+    PREMIUM_EMOJI_BOOK,
+    PREMIUM_EMOJI_CANCEL,
+    PREMIUM_EMOJI_COIN,
+    PREMIUM_EMOJI_CONNECT,
+    PREMIUM_EMOJI_CRYPTO,
+    PREMIUM_EMOJI_DELETE,
+    PREMIUM_EMOJI_DOCUMENT,
+    PREMIUM_EMOJI_EYES,
+    PREMIUM_EMOJI_INFO,
+    PREMIUM_EMOJI_LINK_OUT,
+    PREMIUM_EMOJI_MEGAPHONE,
+    PREMIUM_EMOJI_NEXT,
+    PREMIUM_EMOJI_PAY,
+    PREMIUM_EMOJI_REFERRAL,
+    PREMIUM_EMOJI_STAR,
+    PREMIUM_EMOJI_STATS,
+    PREMIUM_EMOJI_SUBSCRIBE,
+    PREMIUM_EMOJI_SUBSCRIPTION,
+    PREMIUM_EMOJI_SUPPORT,
+    PREMIUM_EMOJI_YES,
+)
+
 
 def get_main_menu_inline_keyboard(
         lang: str,
@@ -20,7 +46,7 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                icon_custom_emoji_id="5260730055880876557",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
             )
         )
     elif connect_url:
@@ -28,7 +54,7 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 url=connect_url,
-                icon_custom_emoji_id="5260730055880876557",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
             )
         )
 
@@ -37,7 +63,7 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_(key="menu_activate_trial_button"),
                 callback_data="main_action:request_trial",
-                icon_custom_emoji_id="5258185631355378853",
+                icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
             )
         )
 
@@ -45,27 +71,27 @@ def get_main_menu_inline_keyboard(
         InlineKeyboardButton(
             text=_(key="menu_subscribe_inline"),
             callback_data="main_action:subscribe",
-            icon_custom_emoji_id="5258152182150077732",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="menu_my_subscription_inline"),
             callback_data="main_action:my_subscription",
-            icon_custom_emoji_id="5258476306152038031",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIPTION,
         )
     )
 
     info_button = InlineKeyboardButton(
         text=_(key="menu_info_button"),
         callback_data="main_action:info",
-        icon_custom_emoji_id="5258503720928288433",
+        icon_custom_emoji_id=PREMIUM_EMOJI_INFO,
     )
     if settings.REFERRAL_ENABLED:
         referral_button = InlineKeyboardButton(
             text=_(key="menu_referral_inline"),
             callback_data="main_action:referral",
-            icon_custom_emoji_id="5258513401784573443",
+            icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
         )
         builder.row(referral_button, info_button)
     else:
@@ -74,6 +100,7 @@ def get_main_menu_inline_keyboard(
     language_button = InlineKeyboardButton(
         text=_(key="menu_language_settings_inline"),
         callback_data="main_action:language",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BOOK,
     )
     status_button_list = []
     if settings.SERVER_STATUS_URL:
@@ -81,7 +108,7 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_(key="menu_server_status_button"),
                 url=settings.SERVER_STATUS_URL,
-                icon_custom_emoji_id="5258391025281408576",
+                icon_custom_emoji_id=PREMIUM_EMOJI_STATS,
             )
         )
 
@@ -95,7 +122,7 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_(key="menu_support_button"),
                 url=settings.SUPPORT_LINK,
-                icon_custom_emoji_id="5258215846450305872",
+                icon_custom_emoji_id=PREMIUM_EMOJI_SUPPORT,
             )
         )
 
@@ -111,7 +138,7 @@ def get_info_keyboard(lang: str, i18n_instance,
             InlineKeyboardButton(
                 text=_(key="menu_privacy_policy_button"),
                 url=settings.PRIVACY_POLICY_URL,
-                icon_custom_emoji_id="5258476306152038031",
+                icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIPTION,
             )
         )
     if settings.TERMS_OF_SERVICE_URL:
@@ -119,14 +146,14 @@ def get_info_keyboard(lang: str, i18n_instance,
             InlineKeyboardButton(
                 text=_(key="menu_terms_of_service_button"),
                 url=settings.TERMS_OF_SERVICE_URL,
-                icon_custom_emoji_id="5258477770735885832",
+                icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
             )
         )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data="main_action:back_to_main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -144,7 +171,7 @@ def get_language_selection_keyboard(i18n_instance,
     builder.button(
         text=_(key="back_to_main_menu_button"),
         callback_data="main_action:back_to_main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -157,12 +184,12 @@ def get_trial_confirmation_keyboard(lang: str,
     builder.button(
         text=_(key="trial_confirm_activate_button"),
         callback_data="trial_action:confirm_activate",
-        icon_custom_emoji_id="5260416304224936047",
+        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
     )
     builder.button(
         text=_(key="cancel_button"),
         callback_data="main_action:back_to_main",
-        icon_custom_emoji_id="5258226313285607065",
+        icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -192,14 +219,17 @@ def get_subscription_options_keyboard(subscription_options: Dict[
                                     price=price,
                                     currency_symbol=currency_symbol_val)
                     callback_data = f"subscribe_period:{months}"
-                builder.button(text=button_text,
-                               callback_data=callback_data)
+                builder.button(
+                    text=button_text,
+                    callback_data=callback_data,
+                    icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+                )
         builder.adjust(1)
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data="main_action:back_to_main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -220,41 +250,42 @@ def get_payment_method_keyboard(months: int, price: float,
             builder.button(
                 text=_("pay_with_severpay_button"),
                 callback_data=f"pay_severpay:{value_str}:{price}{mode_suffix}",
-                icon_custom_emoji_id="5258204546391351475",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
             )
         elif method == "freekassa" and settings.FREEKASSA_ENABLED:
             builder.button(
                 text=_("pay_with_sbp_button"),
                 callback_data=f"pay_fk:{value_str}:{price}{mode_suffix}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
             )
         elif method == "platega" and settings.PLATEGA_ENABLED:
             builder.button(
                 text=_("pay_with_platega_button"),
                 callback_data=f"pay_platega:{value_str}:{price}{mode_suffix}",
-                icon_custom_emoji_id="5258204546391351475",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
             )
         elif method == "yookassa" and settings.YOOKASSA_ENABLED:
             builder.button(
                 text=_("pay_with_yookassa_button"),
                 callback_data=f"pay_yk:{value_str}:{price}{mode_suffix}",
-                icon_custom_emoji_id="5258204546391351475",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
             )
         elif method == "stars" and settings.STARS_ENABLED and stars_price is not None:
             builder.button(
                 text=_("pay_with_stars_button"),
                 callback_data=f"pay_stars:{value_str}:{stars_price}{mode_suffix}",
-                icon_custom_emoji_id="5258185631355378853",
+                icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
             )
         elif method == "cryptopay" and settings.CRYPTOPAY_ENABLED:
             builder.button(
                 text=_("pay_with_cryptopay_button"),
                 callback_data=f"pay_crypto:{value_str}:{price}{mode_suffix}",
-                icon_custom_emoji_id="5359719332542718652",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CRYPTO,
             )
     builder.button(
         text=_(key="cancel_button"),
         callback_data="main_action:subscribe",
-        icon_custom_emoji_id="5258226313285607065",
+        icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -271,19 +302,19 @@ def get_payment_url_keyboard(payment_url: str,
     builder.button(
         text=_(key="pay_button"),
         url=payment_url,
-        icon_custom_emoji_id="5258204546391351475",
+        icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
     )
     if back_callback:
         builder.button(
             text=_(key=back_text_key),
             callback_data=back_callback,
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     else:
         builder.button(
             text=_(key="back_to_main_menu_button"),
             callback_data="main_action:back_to_main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     builder.adjust(1)
     return builder.as_markup()
@@ -310,21 +341,21 @@ def get_yk_autopay_choice_keyboard(
             InlineKeyboardButton(
                 text=_(key="yookassa_autopay_pay_saved_card_button"),
                 callback_data=f"pay_yk_saved_list:{value_str}:{price_str}{suffix}",
-                icon_custom_emoji_id="5258204546391351475",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
             )
         )
     builder.row(
         InlineKeyboardButton(
             text=_(key="yookassa_autopay_pay_new_card_button"),
             callback_data=f"pay_yk_new:{value_str}:{price_str}{suffix}",
-            icon_custom_emoji_id="5258108352008823107",
+            icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_payment_methods_button"),
             callback_data=f"subscribe_period:{value_str}",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -357,6 +388,7 @@ def get_yk_saved_cards_keyboard(
             InlineKeyboardButton(
                 text=title,
                 callback_data=f"pay_yk_use_saved:{value_str}:{price_str}:{method_id}{suffix}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
             )
         )
 
@@ -366,7 +398,7 @@ def get_yk_saved_cards_keyboard(
             InlineKeyboardButton(
                 text="⬅️",
                 callback_data=f"pay_yk_saved_list:{value_str}:{price_str}:{page-1}{suffix}",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
     if end < total:
@@ -374,7 +406,7 @@ def get_yk_saved_cards_keyboard(
             InlineKeyboardButton(
                 text="➡️",
                 callback_data=f"pay_yk_saved_list:{value_str}:{price_str}:{page+1}{suffix}",
-                icon_custom_emoji_id="5258215850745275216",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
             )
         )
     if nav_buttons:
@@ -384,14 +416,14 @@ def get_yk_saved_cards_keyboard(
         InlineKeyboardButton(
             text=_(key="yookassa_autopay_pay_new_card_button"),
             callback_data=f"pay_yk_new:{value_str}:{price_str}{suffix}",
-            icon_custom_emoji_id="5258108352008823107",
+            icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_autopay_method_choice_button"),
             callback_data=f"pay_yk:{value_str}:{price_str}{suffix}",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -404,12 +436,12 @@ def get_referral_link_keyboard(lang: str,
     builder.button(
         text=_(key="referral_share_message_button"),
         callback_data="referral_action:share_message",
-        icon_custom_emoji_id="5260268501515377807",
+        icon_custom_emoji_id=PREMIUM_EMOJI_MEGAPHONE,
     )
     builder.button(
         text=_(key="back_to_main_menu_button"),
         callback_data="main_action:back_to_main",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -424,13 +456,13 @@ def get_back_to_main_menu_markup(lang: str,
         builder.button(
             text=_(key="back_to_main_menu_button"),
             callback_data=callback_data,
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     else:
         builder.button(
             text=_(key="back_to_main_menu_button"),
             callback_data="main_action:back_to_main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     return builder.as_markup()
 
@@ -441,7 +473,7 @@ def get_subscribe_only_markup(lang: str, i18n_instance) -> InlineKeyboardMarkup:
     builder.button(
         text=_(key="menu_subscribe_inline"),
         callback_data="main_action:subscribe",
-        icon_custom_emoji_id="5258152182150077732",
+        icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
     )
     return builder.as_markup()
 
@@ -455,7 +487,7 @@ def get_user_banned_keyboard(support_link: Optional[str], lang: str,
     builder.button(
         text=_(key="menu_support_button"),
         url=support_link,
-        icon_custom_emoji_id="5258215846450305872",
+        icon_custom_emoji_id=PREMIUM_EMOJI_SUPPORT,
     )
     return builder.as_markup()
 
@@ -480,6 +512,7 @@ def get_channel_subscription_keyboard(
         builder.button(
             text=_(key="channel_subscription_join_button"),
             url=channel_link,
+            icon_custom_emoji_id=PREMIUM_EMOJI_LINK_OUT,
         )
         has_buttons = True
 
@@ -487,6 +520,7 @@ def get_channel_subscription_keyboard(
         builder.button(
             text=_(key="channel_subscription_verify_button"),
             callback_data="channel_subscription:verify",
+            icon_custom_emoji_id=PREMIUM_EMOJI_EYES,
         )
         has_buttons = True
 
@@ -514,7 +548,7 @@ def get_connect_and_main_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                icon_custom_emoji_id="5260730055880876557",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
             )
         )
     elif button_target:
@@ -522,7 +556,7 @@ def get_connect_and_main_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 url=button_target,
-                icon_custom_emoji_id="5260730055880876557",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
             )
         )
     else:
@@ -530,7 +564,7 @@ def get_connect_and_main_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 callback_data="main_action:my_subscription",
-                icon_custom_emoji_id="5260730055880876557",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
             )
         )
 
@@ -539,7 +573,7 @@ def get_connect_and_main_keyboard(
         InlineKeyboardButton(
             text=_("back_to_main_menu_button"),
             callback_data=back_callback,
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
 
@@ -554,14 +588,14 @@ def get_payment_methods_manage_keyboard(lang: str, i18n_instance, has_card: bool
         InlineKeyboardButton(
             text=_(key="payment_method_bind_button"),
             callback_data="pm:bind",
-            icon_custom_emoji_id="5258108352008823107",
+            icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data="main_action:back_to_main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -586,7 +620,11 @@ def get_payment_methods_list_keyboard(
     end = start + per_page
     for pm_id, title in cards[start:end]:
         builder.row(
-            InlineKeyboardButton(text=title, callback_data=f"pm:view:{pm_id}")
+            InlineKeyboardButton(
+                text=title,
+                callback_data=f"pm:view:{pm_id}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
+            )
         )
 
     # Pagination controls if needed
@@ -596,7 +634,7 @@ def get_payment_methods_list_keyboard(
             InlineKeyboardButton(
                 text="⬅️",
                 callback_data=f"pm:list:{page-1}",
-                icon_custom_emoji_id="5258236805890710909",
+                icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
             )
         )
     if end < total:
@@ -604,7 +642,7 @@ def get_payment_methods_list_keyboard(
             InlineKeyboardButton(
                 text="➡️",
                 callback_data=f"pm:list:{page+1}",
-                icon_custom_emoji_id="5258215850745275216",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
             )
         )
     if nav_buttons:
@@ -615,14 +653,14 @@ def get_payment_methods_list_keyboard(
         InlineKeyboardButton(
             text=_(key="payment_method_bind_button"),
             callback_data="pm:bind",
-            icon_custom_emoji_id="5258108352008823107",
+            icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data="main_action:back_to_main",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -632,11 +670,15 @@ def get_payment_method_delete_confirm_keyboard(pm_id: str, lang: str, i18n_insta
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text=_(key="yes_button"), callback_data=f"pm:delete:{pm_id}"),
+        InlineKeyboardButton(
+            text=_(key="yes_button"),
+            callback_data=f"pm:delete:{pm_id}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_YES,
+        ),
         InlineKeyboardButton(
             text=_(key="cancel_button"),
             callback_data=f"pm:view:{pm_id}",
-            icon_custom_emoji_id="5258226313285607065",
+            icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
         ),
     )
     return builder.as_markup()
@@ -649,21 +691,21 @@ def get_payment_method_details_keyboard(pm_id: str, lang: str, i18n_instance) ->
         InlineKeyboardButton(
             text=_(key="payment_method_tx_history_title"),
             callback_data=f"pm:history:{pm_id}",
-            icon_custom_emoji_id="5258477770735885832",
+            icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="payment_method_delete_button"),
             callback_data=f"pm:delete_confirm:{pm_id}",
-            icon_custom_emoji_id="5258130763148172425",
+            icon_custom_emoji_id=PREMIUM_EMOJI_DELETE,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data="pm:list:0",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -675,12 +717,12 @@ def get_bind_url_keyboard(bind_url: str, lang: str, i18n_instance) -> InlineKeyb
     builder.button(
         text=_(key="payment_method_bind_button"),
         url=bind_url,
-        icon_custom_emoji_id="5258108352008823107",
+        icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
     )
     builder.button(
         text=_(key="back_to_main_menu_button"),
         callback_data="pm:manage",
-        icon_custom_emoji_id="5258236805890710909",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -693,7 +735,7 @@ def get_back_to_payment_methods_keyboard(lang: str, i18n_instance) -> InlineKeyb
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data="pm:list:0",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -707,7 +749,7 @@ def get_back_to_payment_method_details_keyboard(pm_id: str, lang: str, i18n_inst
         InlineKeyboardButton(
             text=_(key="back_to_main_menu_button"),
             callback_data=f"pm:view:{pm_id}",
-            icon_custom_emoji_id="5258236805890710909",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )
     return builder.as_markup()
@@ -720,14 +762,14 @@ def get_autorenew_cancel_keyboard(lang: str, i18n_instance) -> InlineKeyboardMar
         InlineKeyboardButton(
             text=_(key="autorenew_disable_button"),
             callback_data="autorenew:cancel",
-            icon_custom_emoji_id="5275969776668134187",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BAN,
         )
     )
     builder.row(
         InlineKeyboardButton(
             text=_(key="menu_my_subscription_inline"),
             callback_data="main_action:my_subscription",
-            icon_custom_emoji_id="5258476306152038031",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIPTION,
         )
     )
     return builder.as_markup()
@@ -737,7 +779,15 @@ def get_autorenew_confirm_keyboard(enable: bool, sub_id: int, lang: str, i18n_in
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text=_(key="yes_button"), callback_data=f"autorenew:confirm:{sub_id}:{1 if enable else 0}"),
-        InlineKeyboardButton(text=_(key="no_button"), callback_data="main_action:my_subscription"),
+        InlineKeyboardButton(
+            text=_(key="yes_button"),
+            callback_data=f"autorenew:confirm:{sub_id}:{1 if enable else 0}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_YES,
+        ),
+        InlineKeyboardButton(
+            text=_(key="no_button"),
+            callback_data="main_action:my_subscription",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIPTION,
+        ),
     )
     return builder.as_markup()
