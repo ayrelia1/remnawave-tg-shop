@@ -138,6 +138,7 @@ async def display_subscription_options(
         caption=text_content,
         reply_markup=reply_markup,
         is_edit=isinstance(event, types.CallbackQuery),
+
     )
     if isinstance(event, types.CallbackQuery):
         try:
@@ -208,6 +209,7 @@ async def my_subscription_command_handler(
                     caption=text,
                     reply_markup=kb,
                     is_edit=True,
+
                 )
         else:
             await edit_or_send_with_photo(
@@ -216,6 +218,7 @@ async def my_subscription_command_handler(
                 caption=text,
                 reply_markup=kb,
                 is_edit=False,
+    
             )
         return
 
@@ -398,6 +401,7 @@ async def my_subscription_command_handler(
                 caption=text,
                 reply_markup=markup,
                 is_edit=True,
+    
             )
     else:
         await edit_or_send_with_photo(
@@ -406,6 +410,7 @@ async def my_subscription_command_handler(
             caption=text,
             reply_markup=markup,
             is_edit=False,
+
         )
 
 
@@ -536,6 +541,7 @@ async def my_devices_command_handler(
                 caption=text,
                 reply_markup=markup,
                 is_edit=True,
+    
             )
     else:
         await edit_or_send_with_photo(
@@ -544,6 +550,7 @@ async def my_devices_command_handler(
             caption=text,
             reply_markup=markup,
             is_edit=False,
+
         )
 
 

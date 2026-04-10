@@ -34,9 +34,6 @@ from bot.services.referral_service import ReferralService
 from bot.services.promo_code_service import PromoCodeService
 from bot.services.stars_service import StarsService
 from bot.services.crypto_pay_service import CryptoPayService, cryptopay_webhook_route
-from bot.services.backup_service import BackupService
-from bot.services.node_monitor_service import NodeMonitorService
-
 from bot.handlers.user import payment as user_payment_webhook_module
 from bot.handlers.admin.sync_admin import perform_sync
 from bot.utils.message_queue import init_queue_manager
@@ -80,12 +77,18 @@ async def on_startup_configured(dispatcher: Dispatcher):
                 logging.info("STARTUP: Telegram webhook currently empty (will set).")
 
             telegram_webhook_secret = (settings.TELEGRAM_WEBHOOK_SECRET or "").strip() or None
-            set_success = await bot.set_webhook(
-                url=full_telegram_webhook_url,
-                drop_pending_updates=True,
-                allowed_updates=dispatcher.resolve_used_update_types(),
-                secret_token=telegram_webhook_secret,
-            )
+
+            # Only set webhook if URL changed; never drop pending updates
+            # so that parallel workers don't lose each other's in-flight updates.
+            if current_webhook_info.url == full_telegram_webhook_url:
+                logging.info("STARTUP: Telegram webhook URL unchanged, skipping set_webhook.")
+                set_success = True
+            else:
+                set_success = await bot.set_webhook(
+                    url=full_telegram_webhook_url,
+                    allowed_updates=dispatcher.resolve_used_update_types(),
+                    secret_token=telegram_webhook_secret,
+                )
             if set_success:
                 logging.info("STARTUP: bot.set_webhook returned SUCCESS (True).")
             else:
@@ -159,27 +162,6 @@ async def on_startup_configured(dispatcher: Dispatcher):
             exc_info=True,
         )
 
-    # Start backup scheduler
-    try:
-        backup_service: Optional[BackupService] = dispatcher.get("backup_service")
-        if backup_service:
-            backup_service.start_scheduler()
-            logging.info("STARTUP: Backup scheduler started (daily at %02d:00)", settings.BACKUP_HOUR)
-    except Exception as e:
-        logging.error("STARTUP: Failed to start backup scheduler: %s", e, exc_info=True)
-
-    # Start node monitor
-    try:
-        node_monitor_service: Optional[NodeMonitorService] = dispatcher.get("node_monitor_service")
-        if node_monitor_service:
-            node_monitor_service.start_monitoring()
-            logging.info(
-                "STARTUP: Node monitor started (interval=%d min)",
-                settings.NODE_MONITOR_INTERVAL_MINUTES,
-            )
-    except Exception as e:
-        logging.error("STARTUP: Failed to start node monitor: %s", e, exc_info=True)
-
     # Automatic sync on startup
     try:
         logging.info("STARTUP: Running automatic panel sync...")
@@ -225,16 +207,6 @@ async def on_shutdown_configured(dispatcher: Dispatcher):
                     logging.info(f"{key} session closed on shutdown.")
                 except Exception as e:
                     logging.warning(f"Failed to close session for {key}: {e}")
-
-    # Stop background tasks first
-    for bg_key in ("backup_service", "node_monitor_service"):
-        svc = dispatcher.get(bg_key)
-        if svc and hasattr(svc, "stop"):
-            try:
-                svc.stop()
-                logging.info(f"{bg_key} stopped.")
-            except Exception as e:
-                logging.warning(f"Failed to stop {bg_key}: {e}")
 
     for service_key in (
         "panel_service",

@@ -1,6 +1,6 @@
 {
   "welcome": "Добро пожаловать, {user_name}!",
-  "channel_subscription_required": "Чтобы пользоваться ботом, подпишитесь на канал и нажмите \"Проверить подписку\".",
+  "channel_subscription_required": "ℹ️ Чтобы пользоваться VPN, обязательно подпишитесь на канал и нажмите \"Проверить подписку\".",
   "channel_subscription_join_button": "Перейти в канал",
   "channel_subscription_verify_button": "Проверить подписку",
   "channel_subscription_check_failed": "Не удалось проверить подписку. Попробуйте позже или обратитесь в поддержку.",
@@ -21,6 +21,7 @@
   "menu_language_settings_inline": "Язык",
   "menu_server_status_button": "Статус",
   "menu_support_button": "Поддержка",
+  "menu_channel_subscribe_button": "Новости",
   "menu_terms_button": "Условия сервиса",
   "back_to_main_menu_button": "Назад",
   "choose_language": "Выберите язык / Select language:",

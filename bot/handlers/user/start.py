@@ -158,6 +158,7 @@ async def send_main_menu(target_event: Union[types.Message,
         caption=text,
         reply_markup=reply_markup,
         is_edit=is_edit,
+
     )
 
     if isinstance(target_event, types.CallbackQuery):
@@ -371,6 +372,7 @@ async def send_info_section(
         caption=text,
         reply_markup=reply_markup,
         is_edit=isinstance(event, types.CallbackQuery),
+
     )
 
     if isinstance(event, types.CallbackQuery):

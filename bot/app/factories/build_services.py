@@ -86,7 +86,6 @@ def build_core_services(
 
     backup_service = BackupService(bot, settings, notification_service)
     node_monitor_service = NodeMonitorService(settings, panel_service, notification_service)
-
     # Wire services that depend on each other
     try:
         # Allow subscription service to consume promo codes

@@ -724,6 +724,10 @@ class Settings(BaseSettings):
         description="How long a discount promo reservation is kept before user payment",
     )
 
+    # Auto sync with panel
+    AUTO_SYNC_ENABLED: bool = Field(default=False, description="Enable automatic periodic panel synchronization")
+    AUTO_SYNC_INTERVAL_HOURS: int = Field(default=6, description="How often (hours) to run automatic panel sync")
+
     model_config = SettingsConfigDict(env_file='.env',
                                       env_file_encoding='utf-8',
                                       extra='ignore',

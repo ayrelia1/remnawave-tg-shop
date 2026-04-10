@@ -16,6 +16,22 @@ services:
     restart: unless-stopped
     depends_on:
       - remnawave-tg-shop-db
+
+  remnawave-tg-shop-scheduler:
+    image: kavore/remnawave-tg-shop:latest
+    container_name: remnawave-tg-shop-scheduler
+    hostname: remnawave-tg-shop-scheduler
+    env_file:
+      - .env
+    networks:
+      - remnawave-network
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+    depends_on:
+      - remnawave-tg-shop-db
+    command: ["python", "scheduler.py"]
+
   remnawave-tg-shop-db:
     image: postgres:17
     container_name: remnawave-tg-shop-db

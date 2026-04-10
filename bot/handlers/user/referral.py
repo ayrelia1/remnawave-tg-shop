@@ -125,6 +125,7 @@ async def referral_command_handler(event: Union[types.Message,
             caption=text,
             reply_markup=reply_markup_val,
             is_edit=isinstance(event, types.CallbackQuery),
+
         )
     if isinstance(event, types.CallbackQuery):
         try:

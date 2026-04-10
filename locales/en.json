@@ -1,6 +1,6 @@
 {
   "welcome": "Welcome, {user_name}!",
-  "channel_subscription_required": "To use the bot, join the channel and tap \"Check subscription\".",
+  "channel_subscription_required": "ℹ️ To use the bot, join the channel and tap \"Check subscription\".",
   "channel_subscription_join_button": "Open channel",
   "channel_subscription_verify_button": "Check subscription",
   "channel_subscription_check_failed": "Couldn't verify the subscription. Please try again later or contact support.",
@@ -21,6 +21,7 @@
   "menu_language_settings_inline": "Language",
   "menu_server_status_button": "Status",
   "menu_support_button": "Support",
+  "menu_channel_subscribe_button": "News",
   "menu_terms_button": "Terms of Service",
   "back_to_main_menu_button": "Back",
   "choose_language": "Choose language:",

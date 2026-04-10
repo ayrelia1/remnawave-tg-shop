@@ -20,6 +20,23 @@ services:
     ports:
       - '127.0.0.1:8080:8080'
 
+  remnawave-tg-shop-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: remnawave-tg-shop
+    container_name: remnawave-tg-shop-scheduler
+    hostname: remnawave-tg-shop-scheduler
+    env_file:
+      - .env
+    networks:
+      - remnawave-network
+    restart: unless-stopped
+    depends_on:
+      remnawave-tg-shop-db:
+        condition: service_healthy
+    command: ["python", "scheduler.py"]
+
   remnawave-tg-shop-db:
     image: postgres:17
     container_name: remnawave-tg-shop-db
