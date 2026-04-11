@@ -1,6 +1,7 @@
 import logging
 import re
 from aiogram import Router, F, types, Bot
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,28 @@ from bot.utils.message_helpers import safe_edit_text
 from .start import send_main_menu
 
 router = Router(name="user_promo_router")
+
+
+@router.message(Command("promo"))
+async def promo_command_handler(message: types.Message, state: FSMContext,
+                                i18n_data: dict, settings: Settings,
+                                session: AsyncSession):
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    if not i18n:
+        await message.answer("Language service error.")
+        return
+    _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
+
+    await message.answer(
+        _(key="promo_code_prompt"),
+        reply_markup=get_back_to_main_menu_markup(current_lang, i18n))
+
+    await state.set_state(UserPromoStates.waiting_for_promo_code)
+    logging.info(
+        f"User {message.from_user.id} entered state UserPromoStates.waiting_for_promo_code via /promo command."
+    )
+
 
 SUSPICIOUS_SQL_KEYWORDS_REGEX = re.compile(
     r"\b(DROP\s*TABLE|DELETE\s*FROM|ALTER\s*TABLE|TRUNCATE\s*TABLE|UNION\s*SELECT|"
