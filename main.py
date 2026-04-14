@@ -24,6 +24,10 @@ async def main():
 
     await init_db(settings, session_factory)
 
+    # Re-apply logging config: Alembic's env.py calls fileConfig() which
+    # overwrites the root logger with alembic.ini's handlers/level.
+    setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+
     await run_bot(settings)
 
 

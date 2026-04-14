@@ -47,6 +47,10 @@ async def run_scheduler():
 
     await init_db(settings, session_factory)
 
+    # Re-apply logging config: Alembic's env.py calls fileConfig() which
+    # overwrites the root logger with alembic.ini's handlers/level.
+    setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+
     bot = Bot(
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
