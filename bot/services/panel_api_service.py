@@ -522,6 +522,32 @@ class PanelApiService:
         logging.info(f"Panel user {user_uuid} deleted successfully.")
         return True
 
+    async def revoke_user_subscription(
+            self,
+            user_uuid: str,
+            revoke_only_passwords: bool = False,
+            log_response: bool = True) -> Optional[Dict[str, Any]]:
+        """Revoke user's subscription — panel generates a new shortUuid/subscriptionUrl
+        and rotates credentials, invalidating the old link on all devices. Dates and
+        traffic limits are preserved."""
+        endpoint = f"/users/{user_uuid}/actions/revoke"
+        payload: Dict[str, Any] = {}
+        if revoke_only_passwords:
+            payload["revokeOnlyPasswords"] = True
+        response_data = await self._request(
+            "POST",
+            endpoint,
+            json=payload,
+            log_full_response=log_response,
+        )
+        if response_data and not response_data.get("error") and "response" in response_data:
+            logging.info(f"Panel user {user_uuid} subscription revoked successfully.")
+            return response_data.get("response")
+        logging.error(
+            f"Failed to revoke subscription for user {user_uuid}. Response: {response_data if not log_response else '(logged above)'}"
+        )
+        return None
+
     async def get_subscription_link(
             self,
             short_uuid_or_sub_uuid: str,

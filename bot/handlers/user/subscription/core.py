@@ -23,12 +23,14 @@ from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
 from bot.constants.premium_emoji import (
+    PREMIUM_EMOJI_CANCEL,
     PREMIUM_EMOJI_COIN,
     PREMIUM_EMOJI_COMPUTER,
     PREMIUM_EMOJI_CONNECT,
     PREMIUM_EMOJI_HAND_STOP,
     PREMIUM_EMOJI_REFRESH,
     PREMIUM_EMOJI_SUBSCRIBE,
+    PREMIUM_EMOJI_YES,
 )
 
 router = Router(name="user_subscription_core_router")
@@ -373,7 +375,16 @@ async def my_subscription_command_handler(
                 )
             ])
 
-        # 3) Payment methods management (when autopayments enabled)
+        # 3) Reset subscription (revoke short UUID, rotate credentials)
+        prepend_rows.append([
+            InlineKeyboardButton(
+                text=get_text("reset_subscription_button"),
+                callback_data="sub:reset_confirm",
+                icon_custom_emoji_id=PREMIUM_EMOJI_REFRESH,
+            )
+        ])
+
+        # 4) Payment methods management (when autopayments enabled)
         if not traffic_mode and settings.yookassa_autopayments_active:
             prepend_rows.append([
                 InlineKeyboardButton(
@@ -767,6 +778,97 @@ async def autorenew_cancel_from_webhook_button(
     except Exception as exc:
         logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
     await my_subscription_command_handler(callback, i18n_data, settings, panel_service, subscription_service, session, bot)
+
+
+@router.callback_query(F.data == "sub:reset_confirm")
+async def reset_subscription_confirm_handler(
+    callback: types.CallbackQuery,
+    settings: Settings,
+    i18n_data: dict,
+    session: AsyncSession,
+    subscription_service: SubscriptionService,
+    panel_service: PanelApiService,
+    bot: Bot,
+):
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    if not active or not active.get("user_id"):
+        try:
+            await callback.answer(get_text("subscription_not_active"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=get_text("reset_subscription_confirm_yes"),
+                callback_data="sub:reset_do",
+                icon_custom_emoji_id=PREMIUM_EMOJI_YES,
+            ),
+            InlineKeyboardButton(
+                text=get_text("cancel_button"),
+                callback_data="main_action:my_subscription",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
+            ),
+        ]
+    ])
+
+    if callback.message:
+        await edit_or_send_with_photo(
+            message=callback.message,
+            bot=callback.message.bot,
+            caption=get_text("reset_subscription_confirm_text"),
+            reply_markup=kb,
+            is_edit=True,
+        )
+    try:
+        await callback.answer()
+    except Exception as exc:
+        logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+
+
+@router.callback_query(F.data == "sub:reset_do")
+async def reset_subscription_do_handler(
+    callback: types.CallbackQuery,
+    settings: Settings,
+    i18n_data: dict,
+    session: AsyncSession,
+    subscription_service: SubscriptionService,
+    panel_service: PanelApiService,
+    bot: Bot,
+):
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    user_uuid = active.get("user_id") if active else None
+    if not user_uuid:
+        try:
+            await callback.answer(get_text("subscription_not_active"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
+    result = await panel_service.revoke_user_subscription(user_uuid)
+    if not result:
+        try:
+            await callback.answer(get_text("reset_subscription_failed"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
+    try:
+        await callback.answer(get_text("reset_subscription_success"), show_alert=True)
+    except Exception as exc:
+        logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+    await my_subscription_command_handler(
+        callback, i18n_data, settings, panel_service, subscription_service, session, bot
+    )
 
 
 @router.message(Command("connect"))
