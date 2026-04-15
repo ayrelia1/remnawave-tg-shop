@@ -1,16 +1,43 @@
 import logging
 import math
-from typing import Optional
+from typing import Callable, Optional
 
 from aiogram import F, Router, types
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline.user_keyboards import get_payment_method_keyboard
 from bot.middlewares.i18n import JsonI18n
+from bot.services.panel_api_service import PanelApiService, PanelUnavailableError
 from bot.utils.message_helpers import safe_edit_text
 from config.settings import Settings
 
 router = Router(name="user_subscription_payments_selection_router")
+
+
+async def ensure_panel_available_or_alert(
+    callback: types.CallbackQuery,
+    get_text: Callable[..., str],
+    panel_service: Optional[PanelApiService],
+) -> bool:
+    """Ping panel right before creating a payment. If panel is unreachable,
+    show a tech-works alert to the user and return False so the caller can
+    abort. Returns True when the panel responded successfully (or when no
+    panel_service was provided — defensive no-op)."""
+    if panel_service is None:
+        return True
+    try:
+        await panel_service.ping()
+    except PanelUnavailableError as exc:
+        logging.warning(
+            "Panel unavailable — aborting payment creation for user %s: %s",
+            callback.from_user.id, exc,
+        )
+        try:
+            await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        except Exception as e_ans:
+            logging.debug("Suppressed answer exception: %s", e_ans)
+        return False
+    return True
 
 
 async def resolve_fiat_offer_price_for_user(

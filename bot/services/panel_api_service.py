@@ -14,6 +14,15 @@ from db.dal import panel_sync_dal
 from db.models import PanelSyncStatus
 
 
+class PanelUnavailableError(Exception):
+    """Raised when the Remnawave panel is unreachable or returned a 5xx.
+
+    Distinct from logical errors (user not found, validation failure): callers
+    MUST NOT interpret this as "entity does not exist" and MUST NOT mutate
+    local state based on it. Propagate to the user as "technical works".
+    """
+
+
 class PanelApiService:
 
     def __init__(self, settings: Settings):
@@ -33,9 +42,37 @@ class PanelApiService:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(total=10)
             self._session = aiohttp.ClientSession(timeout=timeout)
         return self._session
+
+    @staticmethod
+    def _is_transient_error(response: Optional[Dict[str, Any]]) -> bool:
+        """Detect transport-level failures and 5xx responses. Logical errors
+        (400/401/403/404/A062) are NOT transient — they reflect real state."""
+        if not response or not response.get("error"):
+            return False
+        status = response.get("status_code")
+        if status is None:
+            return False
+        try:
+            status_int = int(status)
+        except (TypeError, ValueError):
+            return False
+        if status_int < 0:
+            return True
+        if 500 <= status_int < 600:
+            return True
+        return False
+
+    def _raise_if_transient(self, response: Optional[Dict[str, Any]], context: str) -> None:
+        if self._is_transient_error(response):
+            message = (
+                response.get("message")
+                or (response.get("details") or {}).get("message")
+                or "panel unreachable"
+            ) if response else "panel unreachable"
+            raise PanelUnavailableError(f"{context}: {message}")
 
     async def close_session(self):
         if self._session and not self._session.closed:
@@ -258,6 +295,7 @@ class PanelApiService:
         full_response = await self._request("GET",
                                             endpoint,
                                             log_full_response=log_response)
+        self._raise_if_transient(full_response, f"get_user_by_uuid({user_uuid})")
         if full_response and not full_response.get(
                 "error") and "response" in full_response:
             return full_response.get("response")
@@ -302,6 +340,7 @@ class PanelApiService:
             response_data = await self._request("GET",
                                                 endpoint,
                                                 log_full_response=log_response)
+            self._raise_if_transient(response_data, f"get_users_by_filter({filter_used_log})")
 
             if response_data and not response_data.get(
                     "error") and "response" in response_data and isinstance(
@@ -318,6 +357,7 @@ class PanelApiService:
             response_data = await self._request("GET",
                                                 endpoint,
                                                 log_full_response=log_response)
+            self._raise_if_transient(response_data, f"get_users_by_filter({filter_used_log})")
 
             if response_data and not response_data.get(
                     "error") and "response" in response_data and isinstance(
@@ -334,6 +374,7 @@ class PanelApiService:
             response_data = await self._request("GET",
                                                 endpoint,
                                                 log_full_response=log_response)
+            self._raise_if_transient(response_data, f"get_users_by_filter({filter_used_log})")
 
             if response_data and not response_data.get(
                     "error") and "response" in response_data and isinstance(
@@ -422,6 +463,7 @@ class PanelApiService:
                                        "/users",
                                        json=payload,
                                        log_full_response=log_response)
+        self._raise_if_transient(response, f"create_panel_user({username_on_panel})")
         if response and not response.get("error") and "response" in response:
             logging.info(
                 f"Panel user '{username_on_panel}' created successfully (UUID: {response.get('response',{}).get('uuid')})."
@@ -448,6 +490,7 @@ class PanelApiService:
                                             "/users",
                                             json=update_payload,
                                             log_full_response=log_response)
+        self._raise_if_transient(full_response, f"update_user_details_on_panel({user_uuid})")
         if full_response and not full_response.get(
                 "error") and "response" in full_response:
             logging.info(f"User {user_uuid} details updated on panel.")
@@ -470,6 +513,7 @@ class PanelApiService:
         response_data = await self._request("POST",
                                             endpoint,
                                             log_full_response=log_response)
+        self._raise_if_transient(response_data, f"update_user_status_on_panel({user_uuid}, {action})")
 
         if response_data and not response_data.get(
                 "error") and "response" in response_data:
@@ -499,6 +543,7 @@ class PanelApiService:
         response_data = await self._request(
             "DELETE", endpoint, log_full_response=log_response
         )
+        self._raise_if_transient(response_data, f"delete_user_from_panel({user_uuid})")
 
         if not response_data:
             logging.error(
@@ -540,6 +585,7 @@ class PanelApiService:
             json=payload,
             log_full_response=log_response,
         )
+        self._raise_if_transient(response_data, f"revoke_user_subscription({user_uuid})")
         if response_data and not response_data.get("error") and "response" in response_data:
             logging.info(f"Panel user {user_uuid} subscription revoked successfully.")
             return response_data.get("response")
@@ -547,6 +593,51 @@ class PanelApiService:
             f"Failed to revoke subscription for user {user_uuid}. Response: {response_data if not log_response else '(logged above)'}"
         )
         return None
+
+    async def get_user_hwid_devices(self, user_uuid: str) -> Optional[List[Dict[str, Any]]]:
+        endpoint = f"/hwid/devices/{user_uuid}"
+        response_data = await self._request("GET", endpoint)
+        self._raise_if_transient(response_data, f"get_user_hwid_devices({user_uuid})")
+        if response_data and not response_data.get("error") and "response" in response_data:
+            payload = response_data.get("response") or {}
+            devices = payload.get("devices")
+            if isinstance(devices, list):
+                return devices
+            return []
+        logging.error(
+            f"Failed to fetch HWID devices for user {user_uuid}. Response: {response_data}"
+        )
+        return None
+
+    async def delete_user_hwid_device(self, user_uuid: str, hwid: str) -> bool:
+        endpoint = "/hwid/devices/delete"
+        payload = {"userUuid": user_uuid, "hwid": hwid}
+        response_data = await self._request("POST", endpoint, json=payload)
+        self._raise_if_transient(
+            response_data, f"delete_user_hwid_device({user_uuid}, {hwid})"
+        )
+        if response_data and not response_data.get("error") and "response" in response_data:
+            return True
+        logging.error(
+            f"Failed to delete HWID device {hwid} for user {user_uuid}. Response: {response_data}"
+        )
+        return False
+
+    async def delete_all_user_hwid_devices(self, user_uuid: str) -> int:
+        devices = await self.get_user_hwid_devices(user_uuid)
+        if not devices:
+            return 0
+        deleted = 0
+        for device in devices:
+            hwid = device.get("hwid")
+            if not hwid:
+                continue
+            if await self.delete_user_hwid_device(user_uuid, hwid):
+                deleted += 1
+        logging.info(
+            f"Deleted {deleted}/{len(devices)} HWID devices for user {user_uuid}."
+        )
+        return deleted
 
     async def get_subscription_link(
             self,
@@ -564,6 +655,7 @@ class PanelApiService:
     async def get_user_devices(self, user_uuid: str) -> Optional[List[Dict[str, Any]]]:
         endpoint = f"/hwid/devices/{user_uuid}"
         response_data = await self._request("GET", endpoint, log_full_response=False)
+        self._raise_if_transient(response_data, f"get_user_devices({user_uuid})")
         if response_data and not response_data.get("error") and "response" in response_data:
             return response_data.get("response")
         logging.error(
@@ -578,6 +670,7 @@ class PanelApiService:
             "hwid": hwid
         }
         response_data = await self._request("POST", endpoint, json=payload, log_full_response=False)
+        self._raise_if_transient(response_data, f"disconnect_device({user_uuid}, {hwid})")
         if response_data and not response_data.get("error") and "response" in response_data:
             return True
         logging.error(
@@ -605,6 +698,13 @@ class PanelApiService:
         if response_data and not response_data.get("error") and "response" in response_data:
             return response_data.get("response")
         return None
+
+    async def ping(self) -> None:
+        """Lightweight reachability check. Raises PanelUnavailableError on
+        transport/5xx failure. Returns None on success. Used to gate flows
+        (like the Buy screen) that must not start when the panel is down."""
+        response_data = await self._request("GET", "/system/stats", log_full_response=False)
+        self._raise_if_transient(response_data, "ping()")
 
     async def get_bandwidth_stats(self) -> Optional[Dict[str, Any]]:
         """Get bandwidth statistics"""

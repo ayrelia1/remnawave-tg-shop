@@ -16,7 +16,7 @@ from bot.keyboards.inline.user_keyboards import (
     get_autorenew_confirm_keyboard,
 )
 from bot.services.subscription_service import SubscriptionService
-from bot.services.panel_api_service import PanelApiService
+from bot.services.panel_api_service import PanelApiService, PanelUnavailableError
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import edit_or_send_with_photo, safe_edit_text
 from db.dal import subscription_dal, user_billing_dal
@@ -185,7 +185,21 @@ async def my_subscription_command_handler(
         await target.answer(get_text("error_service_unavailable"))
         return
 
-    active = await subscription_service.get_active_subscription_details(session, event.from_user.id)
+    try:
+        active = await subscription_service.get_active_subscription_details(session, event.from_user.id)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable while loading subscription for %s: %s", event.from_user.id, exc)
+        if isinstance(event, types.CallbackQuery):
+            try:
+                await event.answer(get_text("panel_unavailable_alert"), show_alert=True)
+            except Exception as e_ans:
+                logging.debug("Suppressed answer exception: %s", e_ans)
+        else:
+            try:
+                await target.answer(get_text("panel_unavailable_alert"))
+            except Exception as e_ans:
+                logging.debug("Suppressed answer exception: %s", e_ans)
+        return
 
     if not active:
         text = get_text("subscription_not_active")
@@ -456,7 +470,18 @@ async def my_devices_command_handler(
         return
 
     # TODO: context?
-    active = await subscription_service.get_active_subscription_details(session, event.from_user.id)
+    try:
+        active = await subscription_service.get_active_subscription_details(session, event.from_user.id)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable in my_devices: %s", exc)
+        if isinstance(event, types.CallbackQuery):
+            try:
+                await event.answer(get_text("panel_unavailable_alert"), show_alert=True)
+            except Exception as e_ans:
+                logging.debug("Suppressed answer exception: %s", e_ans)
+        else:
+            await target.answer(get_text("panel_unavailable_alert"))
+        return
     if not active or not active.get("user_id"):
         message = get_text("subscription_not_active")
         if isinstance(event, types.CallbackQuery):
@@ -468,7 +493,18 @@ async def my_devices_command_handler(
             await target.answer(message)
         return
 
-    devices = await panel_service.get_user_devices(active.get("user_id")) if active else None
+    try:
+        devices = await panel_service.get_user_devices(active.get("user_id")) if active else None
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable fetching devices: %s", exc)
+        if isinstance(event, types.CallbackQuery):
+            try:
+                await event.answer(get_text("panel_unavailable_alert"), show_alert=True)
+            except Exception as e_ans:
+                logging.debug("Suppressed answer exception: %s", e_ans)
+        else:
+            await target.answer(get_text("panel_unavailable_alert"))
+        return
     if not devices:
         if isinstance(event, types.CallbackQuery):
             try:
@@ -595,12 +631,22 @@ async def disconnect_device_handler(
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         return
 
-    active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    try:
+        active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable in disconnect_device: %s", exc)
+        await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        return
     if not active or not active.get("user_id"):
         await callback.answer(get_text("subscription_not_active"), show_alert=True)
         return
 
-    devices = await panel_service.get_user_devices(active.get("user_id"))
+    try:
+        devices = await panel_service.get_user_devices(active.get("user_id"))
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable in disconnect_device fetch: %s", exc)
+        await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        return
     if not devices:
         await callback.answer(get_text("no_devices_found"), show_alert=True)
         return
@@ -622,7 +668,12 @@ async def disconnect_device_handler(
         await callback.answer(get_text("error_try_again"), show_alert=True)
         return
 
-    success = await panel_service.disconnect_device(active.get("user_id"), hwid)
+    try:
+        success = await panel_service.disconnect_device(active.get("user_id"), hwid)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable during disconnect_device: %s", exc)
+        await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        return
     if not success:
         await callback.answer(get_text("error_try_again"), show_alert=True)
         return
@@ -794,7 +845,15 @@ async def reset_subscription_confirm_handler(
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
 
-    active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    try:
+        active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable in reset_confirm: %s", exc)
+        try:
+            await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        except Exception as e_ans:
+            logging.debug("Suppressed answer exception: %s", e_ans)
+        return
     if not active or not active.get("user_id"):
         try:
             await callback.answer(get_text("subscription_not_active"), show_alert=True)
@@ -845,7 +904,15 @@ async def reset_subscription_do_handler(
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
 
-    active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    try:
+        active = await subscription_service.get_active_subscription_details(session, callback.from_user.id)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable in reset_do: %s", exc)
+        try:
+            await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        except Exception as e_ans:
+            logging.debug("Suppressed answer exception: %s", e_ans)
+        return
     user_uuid = active.get("user_id") if active else None
     if not user_uuid:
         try:
@@ -854,13 +921,28 @@ async def reset_subscription_do_handler(
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         return
 
-    result = await panel_service.revoke_user_subscription(user_uuid)
+    try:
+        result = await panel_service.revoke_user_subscription(user_uuid)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable during revoke for %s: %s", user_uuid, exc)
+        try:
+            await callback.answer(get_text("panel_unavailable_alert"), show_alert=True)
+        except Exception as e_ans:
+            logging.debug("Suppressed answer exception: %s", e_ans)
+        return
     if not result:
         try:
             await callback.answer(get_text("reset_subscription_failed"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         return
+
+    try:
+        await panel_service.delete_all_user_hwid_devices(user_uuid)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable during HWID cleanup for %s: %s", user_uuid, exc)
+    except Exception as exc:
+        logging.error("Failed to delete HWID devices for %s: %s", user_uuid, exc)
 
     try:
         await callback.answer(get_text("reset_subscription_success"), show_alert=True)

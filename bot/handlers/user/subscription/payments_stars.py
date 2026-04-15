@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
+from bot.services.panel_api_service import PanelApiService
 from bot.services.stars_service import StarsService
+from bot.handlers.user.subscription.payments_subscription import ensure_panel_available_or_alert
 from config.settings import Settings
 from bot.constants.premium_emoji import PREMIUM_EMOJI_BACK, PREMIUM_EMOJI_CANCEL
 
@@ -21,6 +23,7 @@ async def pay_stars_callback_handler(
     i18n_data: dict,
     session: AsyncSession,
     stars_service: StarsService,
+    panel_service: PanelApiService,
     promo_code_service=None,
 ):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
@@ -32,6 +35,9 @@ async def pay_stars_callback_handler(
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_stars.py: %s", exc)
+        return
+
+    if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
     if not settings.STARS_ENABLED:

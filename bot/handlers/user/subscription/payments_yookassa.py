@@ -12,6 +12,7 @@ from bot.keyboards.inline.user_keyboards import (
 )
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
+from bot.services.panel_api_service import PanelApiService
 from bot.services.yookassa_service import YooKassaService
 from config.settings import Settings
 from db.dal import payment_dal, user_billing_dal, active_discount_dal
@@ -19,7 +20,10 @@ from db.dal import payment_dal, user_billing_dal, active_discount_dal
 router = Router(name="user_subscription_payments_yookassa_router")
 
 
-from bot.handlers.user.subscription.payments_subscription import resolve_fiat_offer_price_for_user
+from bot.handlers.user.subscription.payments_subscription import (
+    ensure_panel_available_or_alert,
+    resolve_fiat_offer_price_for_user,
+)
 
 def _format_value(val: float) -> str:
     return str(int(val)) if float(val).is_integer() else f"{val:g}"
@@ -366,7 +370,7 @@ async def _initiate_yk_payment(
 
 
 @router.callback_query(F.data.startswith("pay_yk:"))
-async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, yookassa_service: YooKassaService, session: AsyncSession, promo_code_service=None):
+async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, yookassa_service: YooKassaService, panel_service: PanelApiService, session: AsyncSession, promo_code_service=None):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
@@ -376,6 +380,9 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
+        return
+
+    if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
     if not yookassa_service or not yookassa_service.configured:
@@ -521,7 +528,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
 
 
 @router.callback_query(F.data.startswith("pay_yk_new:"))
-async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, yookassa_service: YooKassaService, session: AsyncSession, promo_code_service=None):
+async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, yookassa_service: YooKassaService, panel_service: PanelApiService, session: AsyncSession, promo_code_service=None):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
@@ -531,6 +538,9 @@ async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Setti
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
+        return
+
+    if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
     if not yookassa_service or not yookassa_service.configured:
@@ -814,7 +824,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
 
 
 @router.callback_query(F.data.startswith("pay_yk_use_saved:"))
-async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, yookassa_service: YooKassaService, session: AsyncSession, promo_code_service=None):
+async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, yookassa_service: YooKassaService, panel_service: PanelApiService, session: AsyncSession, promo_code_service=None):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
     get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
@@ -824,6 +834,9 @@ async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Sett
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
+        return
+
+    if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
     if not yookassa_service or not yookassa_service.configured:

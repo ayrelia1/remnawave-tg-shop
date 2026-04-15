@@ -8,12 +8,16 @@ from bot.keyboards.inline.user_keyboards import get_payment_url_keyboard
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
 from bot.services.crypto_pay_service import CryptoPayService
+from bot.services.panel_api_service import PanelApiService
 from config.settings import Settings
 
 router = Router(name="user_subscription_payments_crypto_router")
 
 
-from bot.handlers.user.subscription.payments_subscription import resolve_fiat_offer_price_for_user
+from bot.handlers.user.subscription.payments_subscription import (
+    ensure_panel_available_or_alert,
+    resolve_fiat_offer_price_for_user,
+)
 
 @router.callback_query(F.data.startswith("pay_crypto:"))
 async def pay_crypto_callback_handler(
@@ -22,6 +26,7 @@ async def pay_crypto_callback_handler(
     i18n_data: dict,
     session: AsyncSession,
     cryptopay_service: CryptoPayService,
+    panel_service: PanelApiService,
     promo_code_service=None,
 ):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
@@ -33,6 +38,9 @@ async def pay_crypto_callback_handler(
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_crypto.py: %s", exc)
+        return
+
+    if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
     if not cryptopay_service or not getattr(cryptopay_service, "configured", False):

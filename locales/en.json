@@ -463,6 +463,8 @@
   "reset_subscription_confirm_yes": "Yes, reset",
   "reset_subscription_success": "✅ Subscription reset. Add devices using the new link.",
   "reset_subscription_failed": "❌ Failed to reset subscription. Please try again later.",
+  "panel_unavailable_alert": "⚠️ Panel maintenance in progress. Please try again later.",
+  "panel_unavailable_notice": "⚠️ Couldn't load subscription data — the panel is under maintenance. Please try again later.",
   "subscription_autorenew_updated": "Auto-renew settings updated.",
   "payment_methods_manage_button": "Payment Methods",
   "payment_methods_title": "💳 <b>Payment Methods</b>",

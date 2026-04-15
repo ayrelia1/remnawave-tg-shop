@@ -20,7 +20,7 @@ from bot.keyboards.inline.user_keyboards import (
 )
 from bot.utils.message_helpers import edit_or_send_with_photo, safe_edit_text
 from bot.services.subscription_service import SubscriptionService
-from bot.services.panel_api_service import PanelApiService
+from bot.services.panel_api_service import PanelApiService, PanelUnavailableError
 from bot.services.referral_service import ReferralService
 from bot.services.promo_code_service import PromoCodeService
 from config.settings import Settings
@@ -81,6 +81,7 @@ async def send_main_menu(target_event: Union[types.Message,
     # Enrich main menu with active subscription info
     connect_url: Optional[str] = None
     use_mini_app: bool = False
+    panel_unavailable: bool = False
     try:
         active = await subscription_service.get_active_subscription_details(session, user_id)
         if active:
@@ -111,8 +112,11 @@ async def send_main_menu(target_event: Union[types.Message,
                                     current_devices_str = str(total)
                         elif isinstance(devices_response, list):
                             current_devices_str = str(len(devices_response))
-                except Exception as exc:
-                    logging.debug("Failed to fetch devices for main menu: %s", exc)
+                except PanelUnavailableError as exc:
+                    logging.warning("Panel unavailable while fetching devices for main menu (user %s): %s", user_id, exc)
+                    panel_unavailable = True
+                except Exception:
+                    logging.exception("Failed to fetch devices for main menu (user %s)", user_id)
 
             sub_info = _(
                 key="main_menu_subscription_info",
@@ -127,8 +131,14 @@ async def send_main_menu(target_event: Union[types.Message,
                 use_mini_app = True
             else:
                 connect_url = active.get("connect_button_url") or active.get("config_link")
-    except Exception as exc:
-        logging.debug("Failed to enrich main menu with subscription info: %s", exc)
+    except PanelUnavailableError as exc:
+        logging.warning("Panel unavailable while enriching main menu (user %s): %s", user_id, exc)
+        panel_unavailable = True
+    except Exception:
+        logging.exception("Failed to enrich main menu with subscription info (user %s)", user_id)
+
+    if panel_unavailable:
+        text = text + "\n\n" + _(key="panel_unavailable_notice")
 
     reply_markup = get_main_menu_inline_keyboard(current_lang, i18n, settings,
                                                  show_trial_button_in_menu,

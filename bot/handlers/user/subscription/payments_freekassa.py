@@ -9,13 +9,17 @@ from bot.keyboards.inline.user_keyboards import get_payment_url_keyboard
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
 from bot.services.freekassa_service import FreeKassaService
+from bot.services.panel_api_service import PanelApiService
 from config.settings import Settings
 from db.dal import payment_dal
 
 router = Router(name="user_subscription_payments_freekassa_router")
 
 
-from bot.handlers.user.subscription.payments_subscription import resolve_fiat_offer_price_for_user
+from bot.handlers.user.subscription.payments_subscription import (
+    ensure_panel_available_or_alert,
+    resolve_fiat_offer_price_for_user,
+)
 
 @router.callback_query(F.data.startswith("pay_fk:"))
 async def pay_fk_callback_handler(
@@ -23,6 +27,7 @@ async def pay_fk_callback_handler(
     settings: Settings,
     i18n_data: dict,
     freekassa_service: FreeKassaService,
+    panel_service: PanelApiService,
     session: AsyncSession,
     promo_code_service=None,
 ):
@@ -35,6 +40,9 @@ async def pay_fk_callback_handler(
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_freekassa.py: %s", exc)
+        return
+
+    if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
     if not freekassa_service or not freekassa_service.configured:
