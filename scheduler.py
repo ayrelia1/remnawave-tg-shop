@@ -6,7 +6,6 @@ can coexist while background jobs execute exactly once.
 
 Uses APScheduler (AsyncIOScheduler) to manage:
   - Database backups (daily at BACKUP_HOUR)
-  - Node health monitoring (every NODE_MONITOR_INTERVAL_MINUTES)
   - Panel auto-sync (every AUTO_SYNC_INTERVAL_HOURS)
 """
 
@@ -31,7 +30,6 @@ from bot.middlewares.i18n import get_i18n_instance
 from bot.services.panel_api_service import PanelApiService
 from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
-from bot.services.node_monitor_service import NodeMonitorService
 from bot.utils.message_queue import init_queue_manager
 from config.logging_config import setup_logging
 
@@ -62,7 +60,6 @@ async def run_scheduler():
     panel_service = PanelApiService(settings)
 
     backup_service = BackupService(bot, settings, notification_service)
-    node_monitor_service = NodeMonitorService(settings, panel_service, notification_service)
 
     scheduler = AsyncIOScheduler()
 
@@ -82,26 +79,6 @@ async def run_scheduler():
         replace_existing=True,
     )
     logging.info("Scheduler: backup job registered (daily at %02d:00)", settings.BACKUP_HOUR)
-
-    # --- Node monitor: every N minutes ---
-    if settings.NODE_MONITOR_ENABLED:
-        async def job_node_monitor():
-            try:
-                await node_monitor_service.check_nodes()
-            except Exception as e:
-                logging.error("Scheduler: node monitor error: %s", e, exc_info=True)
-
-        scheduler.add_job(
-            job_node_monitor,
-            IntervalTrigger(minutes=settings.NODE_MONITOR_INTERVAL_MINUTES),
-            id="node_monitor",
-            name="Node health check",
-            replace_existing=True,
-        )
-        logging.info(
-            "Scheduler: node monitor job registered (every %d min)",
-            settings.NODE_MONITOR_INTERVAL_MINUTES,
-        )
 
     # --- Auto-sync: every N hours ---
     if settings.AUTO_SYNC_ENABLED:

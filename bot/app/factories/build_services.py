@@ -18,7 +18,6 @@ from bot.services.severpay_service import SeverPayService
 from bot.services.lknpd_service import LknpdService
 from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
-from bot.services.node_monitor_service import NodeMonitorService
 
 
 def build_core_services(
@@ -70,7 +69,7 @@ def build_core_services(
         referral_service=referral_service,
         default_return_url=bot_username_for_default_return,
     )
-    panel_webhook_service = PanelWebhookService(bot, settings, i18n, async_session_factory, panel_service)
+    panel_webhook_service = PanelWebhookService(bot, settings, i18n, async_session_factory, panel_service, notification_service)
     yookassa_service = YooKassaService(
         shop_id=settings.YOOKASSA_SHOP_ID,
         secret_key=settings.YOOKASSA_SECRET_KEY,
@@ -85,7 +84,6 @@ def build_core_services(
     )
 
     backup_service = BackupService(bot, settings, notification_service)
-    node_monitor_service = NodeMonitorService(settings, panel_service, notification_service)
     # Wire services that depend on each other
     try:
         # Allow subscription service to consume promo codes
@@ -112,5 +110,4 @@ def build_core_services(
         "severpay_service": severpay_service,
         "notification_service": notification_service,
         "backup_service": backup_service,
-        "node_monitor_service": node_monitor_service,
     }

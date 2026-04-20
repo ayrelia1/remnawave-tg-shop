@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from typing import Optional
 from config.settings import Settings
 from .panel_api_service import PanelApiService
+from .notification_service import NotificationService
 from bot.middlewares.i18n import JsonI18n
 from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup, get_autorenew_cancel_keyboard
 from db.dal import user_dal
@@ -19,13 +20,16 @@ EVENT_MAP = {
     "user.expires_in_24_hours": (1, "subscription_24h_notification"),
 }
 
+NODE_EVENTS = {"node.offline", "node.online"}
+
 class PanelWebhookService:
-    def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService):
+    def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService, notification_service: NotificationService):
         self.bot = bot
         self.settings = settings
         self.i18n = i18n
         self.async_session_factory = async_session_factory
         self.panel_service = panel_service
+        self.notification_service = notification_service
 
     async def _send_message(
         self,
@@ -135,6 +139,25 @@ class PanelWebhookService:
                 end_date=user_payload.get("expireAt", "")[:10],
             )
 
+    async def handle_node_event(self, event_name: str, node_payload: dict):
+        """Handle node status change events from the Remnawave panel."""
+        name = node_payload.get("name") or node_payload.get("uuid") or "Unknown"
+        address = node_payload.get("address") or node_payload.get("host") or ""
+        port = node_payload.get("port")
+        if port and address:
+            address = f"{address}:{port}"
+        address = address or "N/A"
+
+        try:
+            if event_name == "node.offline":
+                logging.warning("Panel webhook: node offline: %s (%s)", name, address)
+                await self.notification_service.notify_node_down(name, address)
+            elif event_name == "node.online":
+                logging.info("Panel webhook: node online: %s (%s)", name, address)
+                await self.notification_service.notify_node_recovered(name, address)
+        except Exception as e:
+            logging.error("Panel webhook: failed to send node status notification: %s", e)
+
     async def handle_webhook(self, raw_body: bytes, signature_header: Optional[str]) -> web.Response:
         if not self.settings.PANEL_WEBHOOK_SECRET:
             logging.critical("Panel webhook rejected: PANEL_WEBHOOK_SECRET is not configured")
@@ -156,22 +179,28 @@ class PanelWebhookService:
             return web.Response(status=400, text="bad_request")
 
         event_name = payload.get("name") or payload.get("event")
-        user_data = payload.get("payload") or payload.get("data", {})
-        if isinstance(user_data, dict) and "user" in user_data:
-            user_data = user_data.get("user") or user_data
-
-        telegram_id = user_data.get("telegramId") if isinstance(user_data, dict) else None
 
         if not event_name:
             return web.Response(status=200, text="ok_no_event")
 
-        logging.info(
-            "Panel webhook event received: %s; telegramId=%s",
-            event_name,
-            telegram_id if telegram_id is not None else "N/A",
-        )
+        if event_name in NODE_EVENTS:
+            node_data = payload.get("payload") or payload.get("data") or {}
+            if isinstance(node_data, dict) and "node" in node_data:
+                node_data = node_data["node"]
+            logging.info("Panel webhook node event received: %s", event_name)
+            await self.handle_node_event(event_name, node_data if isinstance(node_data, dict) else {})
+        else:
+            user_data = payload.get("payload") or payload.get("data", {})
+            if isinstance(user_data, dict) and "user" in user_data:
+                user_data = user_data.get("user") or user_data
+            telegram_id = user_data.get("telegramId") if isinstance(user_data, dict) else None
+            logging.info(
+                "Panel webhook event received: %s; telegramId=%s",
+                event_name,
+                telegram_id if telegram_id is not None else "N/A",
+            )
+            await self.handle_event(event_name, user_data)
 
-        await self.handle_event(event_name, user_data)
         return web.Response(status=200, text="ok")
 
 async def panel_webhook_route(request: web.Request):

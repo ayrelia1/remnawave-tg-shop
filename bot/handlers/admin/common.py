@@ -17,7 +17,6 @@ from bot.middlewares.i18n import JsonI18n
 from bot.services.panel_api_service import PanelApiService
 from bot.services.subscription_service import SubscriptionService
 from bot.services.backup_service import BackupService
-from bot.services.node_monitor_service import NodeMonitorService
 from bot.utils.message_queue import get_queue_manager
 from bot.constants.premium_emoji import PREMIUM_EMOJI_BACK
 
@@ -59,8 +58,7 @@ async def admin_panel_actions_callback_handler(
         callback: types.CallbackQuery, state: FSMContext, settings: Settings,
         i18n_data: dict, bot: Bot, panel_service: PanelApiService,
         subscription_service: SubscriptionService, session: AsyncSession,
-        backup_service: Optional[BackupService] = None,
-        node_monitor_service: Optional[NodeMonitorService] = None):
+        backup_service: Optional[BackupService] = None):
     action_parts = callback.data.split(":")
     action = action_parts[1]
 
@@ -162,10 +160,7 @@ async def admin_panel_actions_callback_handler(
         asyncio.create_task(_run_backup_and_notify(callback, backup_service, i18n, current_lang))
     elif action == "check_nodes":
         await callback.answer(_("admin_nodes_checking"), show_alert=False)
-        if not node_monitor_service:
-            await callback.message.answer("❌ NodeMonitorService не инициализирован.")
-            return
-        asyncio.create_task(_run_check_nodes_and_notify(callback, node_monitor_service, i18n, current_lang))
+        asyncio.create_task(_run_check_nodes_and_notify(callback, panel_service))
     elif action == "main":
         try:
             await callback.message.edit_text(
@@ -309,20 +304,46 @@ async def _run_backup_and_notify(
         await callback.message.answer(f"❌ Ошибка: {e}")
 
 
+def _node_is_connected(node: dict) -> bool:
+    if "isConnected" in node:
+        return bool(node["isConnected"])
+    if "isOnline" in node:
+        return bool(node["isOnline"])
+    status = str(node.get("status", "")).lower()
+    if status:
+        return status in ("online", "connected", "active")
+    return True
+
+
 async def _run_check_nodes_and_notify(
     callback: types.CallbackQuery,
-    node_monitor_service: "NodeMonitorService",
-    i18n: Optional["JsonI18n"],
-    lang: str,
+    panel_service: "PanelApiService",
 ):
-    """Run manual node health check and show result to the admin."""
+    """Run manual node status check and show the result to the admin."""
     try:
-        result = await node_monitor_service.check_nodes()
-        if result is None:
+        nodes = await panel_service.get_nodes()
+        if nodes is None:
             await callback.message.answer("❌ Не удалось получить статус нод. Проверьте подключение к панели.")
-        else:
-            text = f"🔍 <b>Статус нод:</b>\n\n{result}"
-            await callback.message.answer(text, parse_mode="HTML")
+            return
+        if not nodes:
+            await callback.message.answer("🔍 <b>Статус нод:</b>\n\nНод не найдено", parse_mode="HTML")
+            return
+
+        lines = []
+        for node in nodes:
+            name = node.get("name") or node.get("uuid") or "Unknown"
+            address = node.get("address") or node.get("host") or node.get("ip") or ""
+            port = node.get("port")
+            if port and address:
+                address = f"{address}:{port}"
+            address = address or "N/A"
+            icon = "🟢" if _node_is_connected(node) else "🔴"
+            lines.append(f"{icon} {name} ({address})")
+
+        await callback.message.answer(
+            "🔍 <b>Статус нод:</b>\n\n" + "\n".join(lines),
+            parse_mode="HTML",
+        )
     except Exception as e:
         logging.error("Error in manual node check: %s", e, exc_info=True)
         await callback.message.answer(f"❌ Ошибка: {e}")

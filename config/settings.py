@@ -717,9 +717,6 @@ class Settings(BaseSettings):
     BACKUP_PASSWORD: str = Field(default="changeme", description="Password for encrypted backup archives")
     BACKUP_HOUR: int = Field(default=9, description="Hour (local time) to run the daily database backup (0-23)")
 
-    # Node monitoring settings
-    NODE_MONITOR_ENABLED: bool = Field(default=True, description="Enable Remnawave node health monitoring")
-    NODE_MONITOR_INTERVAL_MINUTES: int = Field(default=5, description="How often (minutes) to check node health")
     DISCOUNT_PROMO_PAYMENT_TIMEOUT_MINUTES: int = Field(
         default=10,
         description="How long a discount promo reservation is kept before user payment",

@@ -1,6 +1,6 @@
 ---
-name: Features Added - Topics, Backups, Node Monitor
-description: Major features added: Telegram topic routing, daily DB backups with 7z encryption, Remnawave node health monitoring, admin buttons for manual backup/node check
+name: Features Added - Topics, Backups, Node Webhook Monitoring
+description: Major features added: Telegram topic routing, daily DB backups with 7z encryption, node status monitoring via Remnawave panel webhooks, admin button for manual backup
 type: project
 ---
 
@@ -18,16 +18,16 @@ type: project
 - Sent as document to Telegram backup topic
 - Requires: postgresql-client + p7zip-full in Dockerfile (added)
 
-**Node monitoring service** (`bot/services/node_monitor_service.py`):
-- Polls /nodes API endpoint every NODE_MONITOR_INTERVAL_MINUTES (default 5)
-- Alerts on node going down or recovering via statuses topic
-- Tracks state per node by uuid/id/name
+**Node monitoring via panel webhooks** (`bot/services/panel_webhook_service.py`):
+- Node status alerts come from Remnawave panel webhooks (events: `node.offline`, `node.online`)
+- `handle_node_event()` extracts name/address from payload, calls `notification_service.notify_node_down/recovered()`
+- `notification_service.notify_node_down/recovered()` still exist and send to statuses topic
+- Old polling-based `node_monitor_service.py` was deleted on 2026-04-16
 
 **Admin panel buttons** (in System Functions section):
 - "💾 Бэкап БД" → manual backup trigger
-- "🔍 Проверить ноды" → manual node status check
 
-**Why:** User requested these features for operational monitoring and DR readiness.
-**How to apply:** When discussing backups or node monitoring, reference these services. The backup requires Docker image rebuild to install pg_dump and 7za.
+**Why:** User requested these features for operational monitoring and DR readiness. Node polling replaced by webhook events per user request on 2026-04-16.
+**How to apply:** Node status notifications now only fire when Remnawave panel sends a webhook. No polling, no scheduler job, no NODE_MONITOR_ENABLED setting. The backup requires Docker image rebuild to install pg_dump and 7za.
 
 Also note: BACKUP_PASSWORD in .env is set to "change_me_strong_password" - user should change it to a strong password before production use.
