@@ -35,7 +35,6 @@ from bot.services.promo_code_service import PromoCodeService
 from bot.services.stars_service import StarsService
 from bot.services.crypto_pay_service import CryptoPayService, cryptopay_webhook_route
 from bot.handlers.user import payment as user_payment_webhook_module
-from bot.handlers.admin.sync_admin import perform_sync
 from bot.utils.message_queue import init_queue_manager
 
 
@@ -164,26 +163,6 @@ async def on_startup_configured(dispatcher: Dispatcher):
             f"STARTUP: Failed to initialize promo discount expiration worker: {e}",
             exc_info=True,
         )
-
-    # Automatic sync on startup
-    try:
-        logging.info("STARTUP: Running automatic panel sync...")
-        
-        async with async_session_factory() as session:
-            sync_result = await perform_sync(
-                panel_service=panel_service,
-                session=session,
-                settings=settings,
-                i18n_instance=i18n_instance
-            )
-            
-        if sync_result.get("status") == "completed":
-            logging.info(f"STARTUP: Automatic sync completed successfully. Details: {sync_result.get('details', 'N/A')}")
-        else:
-            logging.warning(f"STARTUP: Automatic sync completed with issues. Status: {sync_result.get('status', 'unknown')}")
-            
-    except Exception as e:
-        logging.error(f"STARTUP: Failed to run automatic sync: {e}", exc_info=True)
 
     logging.info("STARTUP: Bot on_startup_configured completed.")
 

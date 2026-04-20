@@ -20,7 +20,7 @@ EVENT_MAP = {
     "user.expires_in_24_hours": (1, "subscription_24h_notification"),
 }
 
-NODE_EVENTS = {"node.offline", "node.online"}
+NODE_EVENTS = {"node.connection_lost", "node.connection_restored"}
 
 class PanelWebhookService:
     def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService, notification_service: NotificationService):
@@ -149,11 +149,11 @@ class PanelWebhookService:
         address = address or "N/A"
 
         try:
-            if event_name == "node.offline":
-                logging.warning("Panel webhook: node offline: %s (%s)", name, address)
+            if event_name == "node.connection_lost":
+                logging.warning("Panel webhook: node connection lost: %s (%s)", name, address)
                 await self.notification_service.notify_node_down(name, address)
-            elif event_name == "node.online":
-                logging.info("Panel webhook: node online: %s (%s)", name, address)
+            elif event_name == "node.connection_restored":
+                logging.info("Panel webhook: node connection restored: %s (%s)", name, address)
                 await self.notification_service.notify_node_recovered(name, address)
         except Exception as e:
             logging.error("Panel webhook: failed to send node status notification: %s", e)
