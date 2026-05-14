@@ -172,19 +172,21 @@ def main() -> int:
             logging.error("Failed to terminate connections: %s", res.stderr.strip()[:300])
             return 1
 
-        # 2. Drop and recreate the database.
+        # 2. Drop and recreate the database. DROP/CREATE DATABASE cannot run
+        # inside a transaction block, and psql -c wraps multiple statements in
+        # one transaction — so each statement goes in its own psql call.
         logging.info("Dropping and recreating database '%s'", pg_db)
-        recreate_sql = (
-            f'DROP DATABASE IF EXISTS "{pg_db}";'
-            f' CREATE DATABASE "{pg_db}" OWNER "{pg_user}";'
-        )
-        res = run_psql(
-            base_conn + ["-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", recreate_sql],
-            env,
-        )
-        if res.returncode != 0:
-            logging.error("Failed to recreate database: %s", res.stderr.strip()[:300])
-            return 1
+        for stmt in (
+            f'DROP DATABASE IF EXISTS "{pg_db}";',
+            f'CREATE DATABASE "{pg_db}" OWNER "{pg_user}";',
+        ):
+            res = run_psql(
+                base_conn + ["-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", stmt],
+                env,
+            )
+            if res.returncode != 0:
+                logging.error("Failed (%s): %s", stmt, res.stderr.strip()[:300])
+                return 1
 
         # 3. Replay the dump into the fresh database.
         logging.info("Restoring dump into '%s' — this may take a while...", pg_db)
