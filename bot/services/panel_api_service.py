@@ -653,30 +653,12 @@ class PanelApiService:
         return base_sub_url
 
     async def get_user_devices(self, user_uuid: str) -> Optional[List[Dict[str, Any]]]:
-        endpoint = f"/hwid/devices/{user_uuid}"
-        response_data = await self._request("GET", endpoint, log_full_response=False)
-        self._raise_if_transient(response_data, f"get_user_devices({user_uuid})")
-        if response_data and not response_data.get("error") and "response" in response_data:
-            return response_data.get("response")
-        logging.error(
-            f"Failed to get user devices for user {user_uuid}. Response: {response_data}"
-        )
-        return None
+        """GET /api/hwid/devices/{userUuid} — list of user's HWID devices."""
+        return await self.get_user_hwid_devices(user_uuid)
 
     async def disconnect_device(self, user_uuid: str, hwid: str) -> bool:
-        endpoint = f"/hwid/devices/delete"
-        payload = {
-            "userUuid": user_uuid,
-            "hwid": hwid
-        }
-        response_data = await self._request("POST", endpoint, json=payload, log_full_response=False)
-        self._raise_if_transient(response_data, f"disconnect_device({user_uuid}, {hwid})")
-        if response_data and not response_data.get("error") and "response" in response_data:
-            return True
-        logging.error(
-            f"Failed to disconnect device {hwid} for user {user_uuid}. Payload: {payload}, Response: {response_data}"
-        )
-        return False
+        """POST /api/hwid/devices/delete — remove one device."""
+        return await self.delete_user_hwid_device(user_uuid, hwid)
 
     async def update_bot_db_sync_status(self,
                                         session: AsyncSession,

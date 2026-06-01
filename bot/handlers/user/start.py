@@ -99,8 +99,10 @@ async def send_main_menu(target_event: Union[types.Message,
             if panel_service and user_uuid:
                 try:
                     devices_response = await panel_service.get_user_devices(user_uuid)
-                    if devices_response:
-                        if isinstance(devices_response, dict):
+                    if devices_response is not None:
+                        if isinstance(devices_response, list):
+                            current_devices_str = str(len(devices_response))
+                        elif isinstance(devices_response, dict):
                             dl = devices_response.get("devices")
                             if isinstance(dl, list):
                                 current_devices_str = str(len(dl))
@@ -110,8 +112,6 @@ async def send_main_menu(target_event: Union[types.Message,
                                 total = devices_response.get("total")
                                 if isinstance(total, int):
                                     current_devices_str = str(total)
-                        elif isinstance(devices_response, list):
-                            current_devices_str = str(len(devices_response))
                 except PanelUnavailableError as exc:
                     logging.warning("Panel unavailable while fetching devices for main menu (user %s): %s", user_id, exc)
                     panel_unavailable = True
