@@ -3,6 +3,7 @@ import logging
 import secrets
 import hmac
 import hashlib
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Dict, Any, Tuple
 
@@ -314,6 +315,7 @@ class SeverPayService:
                         provider="severpay",
                         sale_mode=sale_mode,
                         traffic_gb=payment_months if sale_mode == "traffic" else None,
+                        device_limit=payment.hwid_device_limit if sale_mode != "traffic" else None,
                     )
 
                     referral_bonus = None
@@ -347,6 +349,7 @@ class SeverPayService:
                     final_end = referral_bonus["referee_new_end_date"]
                     applied_days = referral_bonus.get("referee_bonus_applied_days", 0)
 
+                days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
                 traffic_label = str(int(payment_months)) if float(payment_months).is_integer() else f"{payment_months:g}"
 
                 if sale_mode == "traffic":
@@ -370,6 +373,7 @@ class SeverPayService:
                     text = _(
                         "payment_successful_with_referral_bonus_full",
                         months=payment_months,
+                        days=days_total,
                         base_end_date=activation["end_date"].strftime("%Y-%m-%d") if activation and activation.get("end_date") else final_end.strftime("%Y-%m-%d") if final_end else "",
                         bonus_days=applied_days,
                         final_end_date=final_end.strftime("%Y-%m-%d") if final_end else "",
@@ -380,6 +384,7 @@ class SeverPayService:
                     text = _(
                         "payment_successful_with_promo_full",
                         months=payment_months,
+                        days=days_total,
                         bonus_days=applied_promo_days,
                         end_date=final_end.strftime("%Y-%m-%d"),
                         config_link=config_link_text,
@@ -388,6 +393,7 @@ class SeverPayService:
                     text = _(
                         "payment_successful_full",
                         months=payment_months,
+                        days=days_total,
                         end_date=final_end.strftime("%Y-%m-%d") if final_end else "",
                         config_link=config_link_text,
                     )

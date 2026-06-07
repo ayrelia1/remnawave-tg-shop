@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
-from config.settings import Settings
+from config.settings import Settings, get_settings
 from db.dal import user_dal, subscription_dal, message_log_dal
 from db.models import User
 from bot.states.admin_states import AdminStates
@@ -36,6 +36,7 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_DOCUMENT,
     PREMIUM_EMOJI_REFRESH,
     PREMIUM_EMOJI_SEARCH,
+    PREMIUM_EMOJI_SUBSCRIBE,
     PREMIUM_EMOJI_SUPPORT,
     PREMIUM_EMOJI_USER,
 )
@@ -134,6 +135,13 @@ def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
         callback_data=f"user_action:add_subscription:{user_id}",
         icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
     )
+    has_tariff_button = get_settings().device_plans_active
+    if has_tariff_button:
+        builder.button(
+            text=_(key="admin_user_set_tariff_button"),
+            callback_data=f"user_action:set_tariff:{user_id}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+        )
 
     # Row 2: Block/Unblock and Message
     builder.button(
@@ -192,7 +200,11 @@ def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
     )
     
     quick_links_width = 2 if referrer_id else 1
-    builder.adjust(2, 2, 2, quick_links_width, 1, 2)
+    if has_tariff_button:
+        # Extra "Change plan" button gets its own row to keep the layout tidy.
+        builder.adjust(2, 1, 2, 2, quick_links_width, 1, 2)
+    else:
+        builder.adjust(2, 2, 2, quick_links_width, 1, 2)
     return builder
 
 
@@ -282,7 +294,18 @@ async def format_user_card(user: User, session: AsyncSession,
             
             status = subscription_details.get('status_from_panel', 'UNKNOWN')
             card_parts.append(f"{_('admin_user_panel_status_label')} {hcode(status)}")
-            
+
+            # Current device tariff (hwidDeviceLimit on the panel)
+            max_devices = subscription_details.get('max_devices')
+            if max_devices in (None, 0):
+                devices_display = _("devices_unlimited_label")
+            else:
+                try:
+                    devices_display = str(int(max_devices))
+                except (TypeError, ValueError):
+                    devices_display = str(max_devices)
+            card_parts.append(f"{_('admin_user_devices_label')} {hcode(devices_display)}")
+
             traffic_limit = subscription_details.get('traffic_limit_bytes')
             traffic_used = subscription_details.get('traffic_used_bytes')
             if traffic_limit and traffic_used is not None:
@@ -434,6 +457,8 @@ async def user_action_handler(callback: types.CallbackQuery, state: FSMContext,
         await handle_reset_trial(callback, user, subscription_service, session, i18n, current_lang)
     elif action == "add_subscription":
         await handle_add_subscription_prompt(callback, state, user, i18n, current_lang)
+    elif action == "set_tariff":
+        await handle_set_tariff_prompt(callback, user, settings, i18n, current_lang)
     elif action == "toggle_ban":
         await handle_toggle_ban(callback, user, panel_service, session, i18n, current_lang)
     elif action == "send_message":
@@ -495,6 +520,80 @@ async def handle_add_subscription_prompt(callback: types.CallbackQuery, state: F
         await callback.message.answer(prompt_text)
     
     await callback.answer()
+
+
+async def handle_set_tariff_prompt(callback: types.CallbackQuery, user: User,
+                                   settings: Settings, i18n_instance, lang: str):
+    """Show tier buttons to set a user's device tariff directly (admin override)."""
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+
+    if not settings.device_plans_active:
+        await callback.answer(_("admin_unknown_action"), show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    for devices in settings.device_tiers:
+        builder.button(
+            text=_("admin_user_set_tariff_option", devices=devices),
+            callback_data=f"admin_set_tariff:{user.user_id}:{devices}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+        )
+    builder.button(
+        text=_(key="admin_user_refresh_button"),
+        callback_data=f"user_action:refresh:{user.user_id}",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+    )
+    builder.adjust(1)
+
+    prompt_text = _("admin_user_set_tariff_prompt", user_id=user.user_id)
+    try:
+        await callback.message.edit_text(prompt_text, reply_markup=builder.as_markup())
+    except Exception:
+        await callback.message.answer(prompt_text, reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_set_tariff:"))
+async def apply_set_tariff_handler(callback: types.CallbackQuery,
+                                   settings: Settings, i18n_data: dict, bot: Bot,
+                                   subscription_service: SubscriptionService,
+                                   panel_service: PanelApiService,
+                                   session: AsyncSession):
+    """Apply an admin-selected device tariff to the user's active subscription."""
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    try:
+        parts = callback.data.split(":")
+        user_id = int(parts[1])
+        devices = int(parts[2])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid action format.", show_alert=True)
+        return
+
+    user = await user_dal.get_user_by_id(session, user_id)
+    if not user:
+        await callback.answer(_("admin_user_not_found_action"), show_alert=True)
+        return
+
+    success = await subscription_service.set_subscription_device_limit(session, user_id, devices)
+    if not success:
+        await callback.answer(_("admin_user_set_tariff_no_active"), show_alert=True)
+        return
+
+    # Notify the user about the tariff change
+    try:
+        user_lang = user.language_code or settings.DEFAULT_LANGUAGE
+        await bot.send_message(
+            user_id,
+            i18n.gettext(user_lang, "user_tariff_changed_notification", devices=devices),
+        )
+    except Exception as exc:
+        logging.debug("Failed to notify user %s about tariff change: %s", user_id, exc)
+
+    await callback.answer(_("admin_user_set_tariff_success", devices=devices), show_alert=True)
+    await handle_refresh_user_card(callback, user, subscription_service, session, i18n, current_lang)
 
 
 async def handle_toggle_ban(callback: types.CallbackQuery, user: User,

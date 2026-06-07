@@ -12,6 +12,8 @@ from sqlalchemy.future import select
 from config.settings import Settings
 from bot.keyboards.inline.user_keyboards import (
     get_subscription_options_keyboard,
+    get_device_tier_keyboard,
+    get_subscription_period_keyboard,
     get_back_to_main_menu_markup,
     get_autorenew_confirm_keyboard,
 )
@@ -35,6 +37,28 @@ from bot.constants.premium_emoji import (
 )
 
 router = Router(name="user_subscription_core_router")
+
+
+# Map raw panel statuses to localized i18n keys (RU/EN come from locale files).
+_PANEL_STATUS_KEYS = {
+    "ACTIVE": "status_active",
+    "ACTIVE_BONUS": "status_active",
+    "TRIAL": "status_trial",
+    "DISABLED": "status_disabled",
+    "LIMITED": "status_limited",
+    "EXPIRED": "status_expired",
+    "INACTIVE": "status_inactive",
+}
+
+
+def _localize_status(status_raw, get_text) -> str:
+    """Return a localized subscription status instead of the raw panel value."""
+    if not status_raw:
+        return get_text("status_active")
+    key = _PANEL_STATUS_KEYS.get(str(status_raw).strip().upper())
+    if key:
+        return get_text(key)
+    return str(status_raw).capitalize()
 
 
 def _shorten_hwid_for_display(hwid: Optional[str], max_length: int = 24) -> str:
@@ -203,6 +227,36 @@ async def display_subscription_options(
             await event.answer(err_msg)
         return
 
+    # Device-tier plans: first step is choosing the number of devices.
+    if getattr(settings, "device_plans_active", False):
+        tier_options = settings.device_subscription_options
+        tier_min_prices = {
+            dev: months_map[min(months_map.keys())]
+            for dev, months_map in tier_options.items()
+            if months_map
+        }
+        target_obj = event.message if isinstance(event, types.CallbackQuery) else event
+        if tier_min_prices:
+            text_content = get_text("select_device_tier")
+            reply_markup = get_device_tier_keyboard(tier_min_prices, "RUB", current_lang, i18n)
+        else:
+            text_content = get_text("no_subscription_options_available")
+            reply_markup = get_back_to_main_menu_markup(current_lang, i18n)
+        if target_obj:
+            await edit_or_send_with_photo(
+                message=target_obj,
+                bot=target_obj.bot,
+                caption=text_content,
+                reply_markup=reply_markup,
+                is_edit=isinstance(event, types.CallbackQuery),
+            )
+        if isinstance(event, types.CallbackQuery):
+            try:
+                await event.answer()
+            except Exception as exc:
+                logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
     currency_symbol_val = "RUB"
     traffic_packages = getattr(settings, "traffic_packages", {}) or {}
     stars_traffic_packages = getattr(settings, "stars_traffic_packages", {}) or {}
@@ -288,6 +342,64 @@ async def reshow_subscription_options_callback(
     await display_subscription_options(
         callback, i18n_data, settings, session, promo_code_service=promo_code_service
     )
+
+
+@router.callback_query(F.data.startswith("subscribe_tier:"))
+async def select_device_tier_callback(
+    callback: types.CallbackQuery,
+    i18n_data: dict,
+    settings: Settings,
+    session: AsyncSession,
+    promo_code_service=None,
+):
+    """Second step of the device-plan flow: show durations for the chosen tier."""
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    if not i18n or not callback.message:
+        try:
+            await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
+    if not getattr(settings, "device_plans_active", False):
+        await display_subscription_options(
+            callback, i18n_data, settings, session, promo_code_service=promo_code_service
+        )
+        return
+
+    try:
+        devices = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        try:
+            await callback.answer(get_text("error_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
+    tier_options = settings.device_subscription_options.get(devices)
+    if not tier_options:
+        try:
+            await callback.answer(get_text("error_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
+        return
+
+    text_content = get_text("select_subscription_period_for_devices", devices=devices)
+    reply_markup = get_subscription_period_keyboard(devices, tier_options, "RUB", current_lang, i18n)
+    await edit_or_send_with_photo(
+        message=callback.message,
+        bot=callback.message.bot,
+        caption=text_content,
+        reply_markup=reply_markup,
+        is_edit=True,
+    )
+    try:
+        await callback.answer()
+    except Exception as exc:
+        logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
 
 
 async def my_subscription_command_handler(
@@ -396,7 +508,7 @@ async def my_subscription_command_handler(
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         text = get_text(
             "my_traffic_details",
-            status=active.get("status_from_panel", get_text("status_active")).capitalize(),
+            status=_localize_status(active.get("status_from_panel"), get_text),
             end_date=end_date.strftime("%Y-%m-%d") if end_date else get_text("traffic_no_expiry"),
             traffic_limit=limit_display,
             traffic_used=used_display,
@@ -416,7 +528,7 @@ async def my_subscription_command_handler(
             "my_subscription_details",
             end_date=end_date.strftime("%Y-%m-%d") if end_date else "N/A",
             days_left=max(0, days_left),
-            status=active.get("status_from_panel", get_text("status_active")).capitalize(),
+            status=_localize_status(active.get("status_from_panel"), get_text),
             config_link=config_link_value,
             max_devices=max_devices_display,
             traffic_limit=(f"{active['traffic_limit_bytes'] / 2**30:.2f} GB" if active.get("traffic_limit_bytes") else get_text("traffic_unlimited")),
@@ -474,6 +586,37 @@ async def my_subscription_command_handler(
                 icon_custom_emoji_id=PREMIUM_EMOJI_COMPUTER,
             )
         ])
+
+        # Renew / Change tariff (device plans only).
+        if not traffic_mode and getattr(settings, "device_plans_active", False):
+            # "Renew" jumps straight to the period selection for the user's
+            # current tariff (same tier -> time just stacks, no switch preview).
+            # Prefer the recorded paid tariff; for trial/legacy fall back to the
+            # panel's current device limit, then to the base tier.
+            renew_devices = None
+            if local_sub and local_sub.hwid_device_limit:
+                renew_devices = int(local_sub.hwid_device_limit)
+            else:
+                panel_devices = active.get("max_devices")
+                if panel_devices and int(panel_devices) in settings.device_tiers:
+                    renew_devices = int(panel_devices)
+                else:
+                    renew_devices = settings.base_device_limit
+            if renew_devices and int(renew_devices) in settings.device_tiers:
+                prepend_rows.append([
+                    InlineKeyboardButton(
+                        text=get_text("renew_subscription_button"),
+                        callback_data=f"subscribe_tier:{int(renew_devices)}",
+                        icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+                    )
+                ])
+            prepend_rows.append([
+                InlineKeyboardButton(
+                    text=get_text("change_tariff_button"),
+                    callback_data="main_action:subscribe",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+                )
+            ])
 
         # 2) Auto-renew toggle (YooKassa only)
         if not traffic_mode and local_sub and local_sub.provider == "yookassa" and settings.yookassa_autopayments_active:

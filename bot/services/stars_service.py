@@ -1,5 +1,6 @@
 import logging
 import math
+from datetime import datetime, timezone
 from typing import Optional
 
 from aiogram import Bot, types
@@ -27,7 +28,19 @@ class StarsService:
         self.subscription_service = subscription_service
         self.referral_service = referral_service
 
-    def _resolve_base_stars_price(self, months: float, sale_mode: str) -> Optional[int]:
+    def _resolve_base_stars_price(
+        self, months: float, sale_mode: str, device_limit: Optional[int] = None
+    ) -> Optional[int]:
+        # Device-tier pricing takes precedence when enabled.
+        if (
+            sale_mode != "traffic"
+            and self.settings.device_plans_active
+            and device_limit
+            and float(months).is_integer()
+        ):
+            tier_price = self.settings.get_plan_stars_price(int(device_limit), int(months))
+            return tier_price
+
         stars_price_source = (
             self.settings.stars_traffic_packages
             if sale_mode == "traffic"
@@ -57,9 +70,9 @@ class StarsService:
 
     async def create_invoice(self, session: AsyncSession, user_id: int, months: float,
                              stars_price: int, description: str, sale_mode: str = "subscription",
-                             promo_code_service=None) -> Optional[int]:
+                             promo_code_service=None, device_limit: Optional[int] = None) -> Optional[int]:
         # Always resolve base price server-side and reject unknown packages.
-        resolved_base_price = self._resolve_base_stars_price(months, sale_mode)
+        resolved_base_price = self._resolve_base_stars_price(months, sale_mode, device_limit)
         if resolved_base_price is None:
             logging.warning(
                 "Stars invoice rejected: base price not found for sale_mode=%s months=%s.",
@@ -115,6 +128,7 @@ class StarsService:
             "subscription_duration_months": int(months),
             "provider": "telegram_stars",
             "promo_code_id": promo_code_id,
+            "hwid_device_limit": device_limit if sale_mode != "traffic" else None,
         }
         try:
             db_payment_record = await payment_dal.create_payment_record(
@@ -151,9 +165,10 @@ class StarsService:
                                          stars_amount: int,
                                          i18n_data: dict,
                                          sale_mode: str = "subscription") -> None:
-        # Fetch payment record to get promo_code_id
+        # Fetch payment record to get promo_code_id and device tier
         payment_record = await payment_dal.get_payment_by_db_id(session, payment_db_id)
         promo_code_id_from_payment = payment_record.promo_code_id if payment_record else None
+        device_limit_from_payment = payment_record.hwid_device_limit if payment_record else None
 
         activation_details = None
         referral_bonus = None
@@ -184,6 +199,7 @@ class StarsService:
                 provider="telegram_stars",
                 sale_mode=sale_mode,
                 traffic_gb=months if sale_mode == "traffic" else None,
+                device_limit=device_limit_from_payment if sale_mode != "traffic" else None,
             )
             if not activation_details or not activation_details.get("end_date"):
                 raise RuntimeError(
@@ -210,6 +226,7 @@ class StarsService:
         final_end = referral_bonus.get("referee_new_end_date") if referral_bonus else None
         if not final_end:
             final_end = activation_details["end_date"]
+        days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
 
         # Always use user's language from DB for user-facing messages
         db_user = await user_dal.get_user_by_id(session, message.from_user.id)
@@ -242,6 +259,7 @@ class StarsService:
             success_msg = _(
                 "payment_successful_with_referral_bonus_full",
                 months=months,
+                days=days_total,
                 base_end_date=activation_details["end_date"].strftime('%Y-%m-%d'),
                 bonus_days=applied_days,
                 final_end_date=final_end.strftime('%Y-%m-%d'),
@@ -252,6 +270,7 @@ class StarsService:
             success_msg = _(
                 "payment_successful_full",
                 months=months,
+                days=days_total,
                 end_date=final_end.strftime('%Y-%m-%d'),
                 config_link=config_link_text,
             )

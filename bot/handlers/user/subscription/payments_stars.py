@@ -9,7 +9,11 @@ from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
 from bot.services.panel_api_service import PanelApiService
 from bot.services.stars_service import StarsService
-from bot.handlers.user.subscription.payments_subscription import ensure_panel_available_or_alert
+from bot.handlers.user.subscription.payments_subscription import (
+    ensure_panel_available_or_alert,
+    parse_simple_offer,
+    offer_back_callback,
+)
 from config.settings import Settings
 from bot.constants.premium_emoji import PREMIUM_EMOJI_BACK, PREMIUM_EMOJI_CANCEL
 
@@ -49,10 +53,11 @@ async def pay_stars_callback_handler(
 
     try:
         _, data_payload = callback.data.split(":", 1)
-        parts = data_payload.split(":")
-        months = float(parts[0])
-        stars_price = int(float(parts[1]))
-        sale_mode = parts[2] if len(parts) > 2 else "subscription"
+        parsed = parse_simple_offer(data_payload)
+        if not parsed:
+            raise ValueError("bad offer payload")
+        devices, months, stars_price_f, sale_mode = parsed
+        stars_price = int(float(stars_price_f))
     except (ValueError, IndexError):
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
@@ -76,6 +81,7 @@ async def pay_stars_callback_handler(
         description=payment_description,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        device_limit=devices,
     )
 
     if payment_db_id:
@@ -91,7 +97,7 @@ async def pay_stars_callback_handler(
                         [
                             InlineKeyboardButton(
                                 text=get_text("back_to_payment_methods_button"),
-                                callback_data=f"subscribe_period:{human_value}",
+                                callback_data=offer_back_callback(devices, months),
                                 icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
                             )
                         ],

@@ -5,13 +5,45 @@ from typing import Callable, Optional
 from aiogram import F, Router, types
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.inline.user_keyboards import get_payment_method_keyboard
+from bot.keyboards.inline.user_keyboards import (
+    get_payment_method_keyboard,
+    get_tariff_switch_confirm_keyboard,
+)
 from bot.middlewares.i18n import JsonI18n
 from bot.services.panel_api_service import PanelApiService, PanelUnavailableError
+from bot.services.subscription_service import SubscriptionService
 from bot.utils.message_helpers import safe_edit_text
 from config.settings import Settings
 
 router = Router(name="user_subscription_payments_selection_router")
+
+
+def _format_units(val: float) -> str:
+    return str(int(val)) if float(val).is_integer() else f"{val:g}"
+
+
+def parse_simple_offer(data_payload: str):
+    """Parse a pay_* offer payload.
+
+    4-part = device-tier mode (devices:value:price:mode);
+    3-part = legacy/traffic (value:price:mode).
+    Returns (devices, value, price, sale_mode) with devices None in legacy/traffic.
+    """
+    parts = data_payload.split(":")
+    try:
+        if len(parts) >= 4:
+            return int(float(parts[0])), float(parts[1]), float(parts[2]), parts[3]
+        return None, float(parts[0]), float(parts[1]), parts[2] if len(parts) > 2 else "subscription"
+    except (ValueError, IndexError):
+        return None
+
+
+def offer_back_callback(devices, value) -> str:
+    """Build the back-to-period callback for a payment screen."""
+    value_str = _format_units(value)
+    if devices is not None:
+        return f"subscribe_period:{int(devices)}:{value_str}"
+    return f"subscribe_period:{value_str}"
 
 
 async def ensure_panel_available_or_alert(
@@ -47,14 +79,15 @@ async def resolve_fiat_offer_price_for_user(
     months: float,
     sale_mode: str,
     promo_code_service=None,
+    devices: Optional[int] = None,
 ) -> Optional[float]:
     """Resolve offer price server-side to prevent callback payload tampering."""
-    price_source = (
-        getattr(settings, "traffic_packages", {}) or {}
-        if sale_mode == "traffic"
-        else (settings.subscription_options or {})
-    )
-    base_price = price_source.get(months)
+    if sale_mode == "traffic":
+        base_price = (getattr(settings, "traffic_packages", {}) or {}).get(months)
+    elif devices is not None and settings.device_plans_active:
+        base_price = settings.get_plan_price(int(devices), int(months))
+    else:
+        base_price = (settings.subscription_options or {}).get(months)
     if base_price is None:
         return None
 
@@ -70,52 +103,39 @@ async def resolve_fiat_offer_price_for_user(
     return resolved_price
 
 
-@router.callback_query(F.data.startswith("subscribe_period:"))
-async def select_subscription_period_callback_handler(
+async def _show_payment_methods_screen(
     callback: types.CallbackQuery,
+    *,
     settings: Settings,
-    i18n_data: dict,
+    i18n: JsonI18n,
+    current_lang: str,
+    get_text,
     session: AsyncSession,
-    promo_code_service=None,  # Injected from dispatcher
-):
-    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
-    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
-    get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+    months: float,
+    devices: Optional[int],
+    traffic_mode: bool,
+    promo_code_service,
+) -> None:
+    """Compute prices (with active discount) and render the payment-method keyboard."""
+    if traffic_mode:
+        price_rub = (getattr(settings, "traffic_packages", {}) or {}).get(months)
+        stars_price = (getattr(settings, "stars_traffic_packages", {}) or {}).get(months)
+        price_source = getattr(settings, "traffic_packages", {}) or {}
+    elif devices is not None and settings.device_plans_active:
+        price_rub = settings.get_plan_price(int(devices), int(months))
+        stars_price = settings.get_plan_stars_price(int(devices), int(months))
+        price_source = settings.device_subscription_options.get(int(devices), {})
+    else:
+        price_rub = (settings.subscription_options or {}).get(months)
+        stars_price = (settings.stars_subscription_options or {}).get(months)
+        price_source = settings.subscription_options or {}
 
-    if not i18n or not callback.message:
-        try:
-            await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
-        return
-
-    traffic_packages = getattr(settings, "traffic_packages", {}) or {}
-    stars_traffic_packages = getattr(settings, "stars_traffic_packages", {}) or {}
-    traffic_mode = bool(getattr(settings, "traffic_sale_mode", False) or stars_traffic_packages)
-    try:
-        months = float(callback.data.split(":")[-1])
-    except (ValueError, IndexError):
-        logging.error(f"Invalid subscription period in callback_data: {callback.data}")
-        try:
-            await callback.answer(get_text("error_try_again"), show_alert=True)
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
-        return
-
-    price_source = traffic_packages if traffic_mode else settings.subscription_options
-    stars_price_source = stars_traffic_packages if traffic_mode else settings.stars_subscription_options
-
-    price_rub = price_source.get(months)
-    stars_price = stars_price_source.get(months)
     currency_symbol_val = "RUB"
-
-    # Check for active discount and apply if exists
     discount_text = ""
     if promo_code_service and (price_rub is not None or stars_price is not None):
         active_discount_info = await promo_code_service.get_user_active_discount(
             session, callback.from_user.id
         )
-
         if active_discount_info:
             discount_pct, promo_code = active_discount_info
             if price_rub is not None:
@@ -176,7 +196,8 @@ async def select_subscription_period_callback_handler(
             currency_symbol_val = "⭐"
         else:
             logging.error(
-                f"Price not found for option {months} using {'traffic_packages' if traffic_mode else 'subscription_options'}."
+                "Price not found for option %s (devices=%s, traffic=%s).",
+                months, devices, traffic_mode,
             )
             try:
                 await callback.answer(get_text("error_try_again"), show_alert=True)
@@ -197,6 +218,7 @@ async def select_subscription_period_callback_handler(
         i18n,
         settings,
         sale_mode="traffic" if traffic_mode else "subscription",
+        devices=devices,
     )
 
     try:
@@ -210,3 +232,161 @@ async def select_subscription_period_callback_handler(
         await callback.answer()
     except Exception as exc:
         logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+
+
+def _parse_period_callback(data: str):
+    """Parse subscribe_period payload. Returns (devices, value) where devices is
+    None in legacy/traffic mode (1 segment) and set in device mode (2 segments)."""
+    parts = data.split(":")[1:]
+    if len(parts) >= 2:
+        return int(float(parts[0])), float(parts[1])
+    return None, float(parts[0])
+
+
+@router.callback_query(F.data.startswith("subscribe_period:"))
+async def select_subscription_period_callback_handler(
+    callback: types.CallbackQuery,
+    settings: Settings,
+    i18n_data: dict,
+    session: AsyncSession,
+    subscription_service: Optional[SubscriptionService] = None,
+    promo_code_service=None,  # Injected from dispatcher
+):
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    if not i18n or not callback.message:
+        try:
+            await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+        return
+
+    stars_traffic_packages = getattr(settings, "stars_traffic_packages", {}) or {}
+    traffic_mode = bool(getattr(settings, "traffic_sale_mode", False) or stars_traffic_packages)
+    try:
+        devices, months = _parse_period_callback(callback.data)
+    except (ValueError, IndexError):
+        logging.error(f"Invalid subscription period in callback_data: {callback.data}")
+        try:
+            await callback.answer(get_text("error_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+        return
+
+    # Device-tier switch preview: warn before payment when switching to a
+    # different tier (days will be recalculated value-preserving).
+    if (
+        not traffic_mode
+        and devices is not None
+        and settings.device_plans_active
+        and subscription_service is not None
+    ):
+        preview = await subscription_service.compute_switch_preview(
+            session, callback.from_user.id, int(devices), int(months)
+        )
+        direction = preview.get("direction")
+        if direction in ("upgrade", "downgrade"):
+            if not subscription_service.is_switch_allowed(direction):
+                try:
+                    await callback.answer(get_text("tariff_switch_disabled"), show_alert=True)
+                except Exception as exc:
+                    logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+                return
+            price = settings.get_plan_price(int(devices), int(months))
+            text = get_text(
+                "tariff_switch_preview",
+                current_devices=preview.get("current_devices"),
+                new_devices=int(devices),
+                remaining_days=preview.get("remaining_days"),
+                total_days=preview.get("total_days"),
+                end_date=preview["projected_end_date"].strftime("%Y-%m-%d"),
+                price=_format_units(price) if price is not None else "-",
+                currency_symbol="RUB",
+            )
+            if direction == "downgrade":
+                text += "\n\n" + get_text("tariff_switch_downgrade_warning", devices=int(devices))
+            markup = get_tariff_switch_confirm_keyboard(int(devices), int(months), current_lang, i18n)
+            try:
+                await safe_edit_text(callback.message, text, reply_markup=markup)
+            except Exception as e_edit:
+                logging.warning(f"Failed to show tariff switch preview: {e_edit}")
+                await callback.message.answer(text, reply_markup=markup)
+            try:
+                await callback.answer()
+            except Exception as exc:
+                logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+            return
+
+    await _show_payment_methods_screen(
+        callback,
+        settings=settings,
+        i18n=i18n,
+        current_lang=current_lang,
+        get_text=get_text,
+        session=session,
+        months=months,
+        devices=devices,
+        traffic_mode=traffic_mode,
+        promo_code_service=promo_code_service,
+    )
+
+
+@router.callback_query(F.data.startswith("confirm_switch:"))
+async def confirm_tariff_switch_handler(
+    callback: types.CallbackQuery,
+    settings: Settings,
+    i18n_data: dict,
+    session: AsyncSession,
+    subscription_service: Optional[SubscriptionService] = None,
+    promo_code_service=None,
+):
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    get_text = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+
+    if not i18n or not callback.message:
+        try:
+            await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+        return
+
+    try:
+        parts = callback.data.split(":")
+        devices = int(float(parts[1]))
+        months = float(parts[2])
+    except (ValueError, IndexError):
+        try:
+            await callback.answer(get_text("error_try_again"), show_alert=True)
+        except Exception as exc:
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+        return
+
+    # Re-check the switch direction here too: the confirm button may be stale
+    # (clicked after the policy changed) or crafted manually.
+    if settings.device_plans_active and subscription_service is not None:
+        preview = await subscription_service.compute_switch_preview(
+            session, callback.from_user.id, int(devices), int(months)
+        )
+        direction = preview.get("direction")
+        if direction in ("upgrade", "downgrade") and not subscription_service.is_switch_allowed(direction):
+            try:
+                await callback.answer(get_text("tariff_switch_disabled"), show_alert=True)
+            except Exception as exc:
+                logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
+            return
+
+    await _show_payment_methods_screen(
+        callback,
+        settings=settings,
+        i18n=i18n,
+        current_lang=current_lang,
+        get_text=get_text,
+        session=session,
+        months=months,
+        devices=devices,
+        traffic_mode=False,
+        promo_code_service=promo_code_service,
+    )

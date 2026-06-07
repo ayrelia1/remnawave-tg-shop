@@ -1,5 +1,6 @@
 import logging
 import json
+from datetime import datetime, timezone
 from typing import Optional
 
 from aiogram import Bot
@@ -66,6 +67,7 @@ class CryptoPayService:
         description: str,
         sale_mode: str = "subscription",
         promo_code_service=None,
+        device_limit: Optional[int] = None,
     ) -> Optional[str]:
         if not self.configured or not self.client:
             logging.error("CryptoPayService not configured")
@@ -127,6 +129,7 @@ class CryptoPayService:
                     "subscription_duration_months": int(months),
                     "provider": "cryptopay",
                     "promo_code_id": promo_code_id,
+                    "hwid_device_limit": device_limit if sale_mode != "traffic" else None,
                 },
             )
             await session.commit()
@@ -143,6 +146,7 @@ class CryptoPayService:
             "payment_db_id": str(payment_record.payment_id),
             "sale_mode": sale_mode,
             "traffic_gb": str(months) if sale_mode == "traffic" else None,
+            "device_limit": str(device_limit) if (device_limit and sale_mode != "traffic") else None,
         })
         try:
             invoice = await self.client.create_invoice(
@@ -185,6 +189,7 @@ class CryptoPayService:
             payment_db_id = int(meta["payment_db_id"])
             sale_mode = meta.get("sale_mode") or ("traffic" if self.settings.traffic_sale_mode else "subscription")
             traffic_gb = float(meta.get("traffic_gb")) if meta.get("traffic_gb") else months
+            device_limit = int(float(meta["device_limit"])) if meta.get("device_limit") else None
         except Exception as e:
             logging.error(f"Failed to parse CryptoPay payload: {e}")
             return
@@ -278,6 +283,7 @@ class CryptoPayService:
                     provider="cryptopay",
                     sale_mode=sale_mode,
                     traffic_gb=traffic_gb if sale_mode == "traffic" else None,
+                    device_limit=device_limit if sale_mode != "traffic" else None,
                 )
                 if not activation or not activation.get("end_date"):
                     raise RuntimeError(
@@ -312,6 +318,7 @@ class CryptoPayService:
             if referral_bonus and referral_bonus.get("referee_new_end_date"):
                 final_end = referral_bonus["referee_new_end_date"]
                 applied_days = referral_bonus.get("referee_bonus_applied_days", 0)
+            days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
 
             if sale_mode == "traffic":
                 text = _("payment_successful_traffic_full",
@@ -330,6 +337,7 @@ class CryptoPayService:
                             inviter_name_display = username_for_display(inviter.username, with_at=False)
                 text = _("payment_successful_with_referral_bonus_full",
                          months=int(months),
+                         days=days_total,
                          base_end_date=activation["end_date"].strftime('%Y-%m-%d'),
                          bonus_days=applied_days,
                          final_end_date=final_end.strftime('%Y-%m-%d'),
@@ -338,6 +346,7 @@ class CryptoPayService:
             else:
                 text = _("payment_successful_full",
                          months=int(months),
+                         days=days_total,
                          end_date=final_end.strftime('%Y-%m-%d') if final_end else "—",
                          config_link=config_link_text)
 

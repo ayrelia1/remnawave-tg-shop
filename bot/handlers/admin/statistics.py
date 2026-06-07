@@ -43,6 +43,25 @@ async def show_statistics_handler(callback: types.CallbackQuery,
     stats_text_parts.append(
         f"💳 {_('admin_user_stats_paid_subs_label')}: <b>{user_stats['paid_subscriptions']}</b>"
     )
+    # Breakdown by device tariff (only in device-plan mode)
+    if getattr(settings, "device_plans_active", False):
+        paid_by_tariff = user_stats.get("paid_by_tariff", {}) or {}
+        if paid_by_tariff:
+            shown = set()
+            for devices in settings.device_tiers:
+                count = paid_by_tariff.get(devices, 0)
+                shown.add(devices)
+                stats_text_parts.append(
+                    f"   • {_('admin_user_stats_tariff_item', devices=devices, count=count)}"
+                )
+            # Any other tariffs not in the configured list (e.g. legacy/manual)
+            for devices, count in paid_by_tariff.items():
+                if devices in shown:
+                    continue
+                label = devices if devices is not None else "—"
+                stats_text_parts.append(
+                    f"   • {_('admin_user_stats_tariff_item', devices=label, count=count)}"
+                )
     stats_text_parts.append(
         f"🆓 {_('admin_user_stats_trial_label')}: <b>{user_stats['trial_users']}</b>"
     )

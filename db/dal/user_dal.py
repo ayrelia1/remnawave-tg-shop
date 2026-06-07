@@ -242,7 +242,26 @@ async def get_enhanced_user_statistics(session: AsyncSession) -> Dict[str, Any]:
         )
     )
     paid_subs_users = (await session.execute(paid_subs_stmt)).scalar() or 0
-    
+
+    # Active paid subscriptions grouped by device tariff (hwid_device_limit)
+    paid_by_tariff_stmt = (
+        select(
+            Subscription.hwid_device_limit,
+            func.count(func.distinct(Subscription.user_id)),
+        )
+        .join(User, Subscription.user_id == User.user_id)
+        .where(
+            and_(
+                Subscription.is_active == True,
+                Subscription.end_date > now,
+                Subscription.provider.is_not(None),
+            )
+        )
+        .group_by(Subscription.hwid_device_limit)
+    )
+    paid_by_tariff_rows = (await session.execute(paid_by_tariff_stmt)).all()
+    paid_by_tariff = {row[0]: row[1] for row in paid_by_tariff_rows}
+
     # Users on trial period
     trial_subs_stmt = (
         select(func.count(func.distinct(Subscription.user_id)))
@@ -269,6 +288,7 @@ async def get_enhanced_user_statistics(session: AsyncSession) -> Dict[str, Any]:
         "banned_users": banned_users,
         "active_today": active_today,
         "paid_subscriptions": paid_subs_users,
+        "paid_by_tariff": paid_by_tariff,
         "trial_users": trial_users,
         "inactive_users": max(0, inactive_users),
         "referral_users": referral_users

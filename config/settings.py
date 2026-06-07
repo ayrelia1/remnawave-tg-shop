@@ -3,6 +3,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, ValidationError, computed_field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 
+# Canonical month durations for device-based subscription tiers.
+# The comma-separated price lists in DEVICE_PLANS_* map positionally to these.
+DEVICE_PLAN_MONTHS: List[int] = [1, 3, 6, 12]
+
 
 class Settings(BaseSettings):
     BOT_TOKEN: str
@@ -154,6 +158,22 @@ class Settings(BaseSettings):
     STARS_PRICE_3_MONTHS: Optional[int] = Field(default=None)
     STARS_PRICE_6_MONTHS: Optional[int] = Field(default=None)
     STARS_PRICE_12_MONTHS: Optional[int] = Field(default=None)
+
+    # Device-based subscription tiers (e.g. 5/10/15 devices), each with its own
+    # price matrix per duration. When enabled, the bot sells these tiers instead
+    # of the single legacy time-based plan. Format of DEVICE_PLANS_RUB / _STARS:
+    #   "<devices>:<1m>,<3m>,<6m>,<12m>|<devices>:..."
+    # Prices map positionally to DEVICE_PLAN_MONTHS ([1,3,6,12]); a value of 0 or
+    # empty disables that duration for the tier. Durations are additionally
+    # filtered by the global MONTH_*_ENABLED toggles.
+    DEVICE_PLANS_ENABLED: bool = Field(default=False)
+    DEVICE_PLANS_RUB: Optional[str] = Field(default=None)
+    DEVICE_PLANS_STARS: Optional[str] = Field(default=None)
+    # Allow/forbid switching to a more expensive / cheaper tier while a
+    # subscription is active. Mirrors how Remnawave shop bots gate tariff changes.
+    TARIFF_SWITCH_UPGRADE_ENABLED: bool = Field(default=True)
+    TARIFF_SWITCH_DOWNGRADE_ENABLED: bool = Field(default=True)
+
     PANEL_WEBHOOK_SECRET: Optional[str] = Field(default=None)
 
     TRAFFIC_PACKAGES: Optional[str] = Field(
@@ -448,6 +468,120 @@ class Settings(BaseSettings):
         if self.STARS_ENABLED and self.MONTH_12_ENABLED and self.STARS_PRICE_12_MONTHS is not None:
             options[12] = self.STARS_PRICE_12_MONTHS
         return options
+
+    def _month_enabled(self, months: int) -> bool:
+        return {
+            1: self.MONTH_1_ENABLED,
+            3: self.MONTH_3_ENABLED,
+            6: self.MONTH_6_ENABLED,
+            12: self.MONTH_12_ENABLED,
+        }.get(months, True)
+
+    @staticmethod
+    def _parse_device_plans(raw: Optional[str], as_int: bool) -> Dict[int, Dict[int, float]]:
+        """Parse "<devices>:<1m>,<3m>,<6m>,<12m>|..." into {devices: {months: price}}."""
+        plans: Dict[int, Dict[int, float]] = {}
+        cleaned = (raw or "").strip()
+        if not cleaned:
+            return plans
+        for tier_chunk in cleaned.split("|"):
+            chunk = tier_chunk.strip()
+            if not chunk or ":" not in chunk:
+                continue
+            devices_str, prices_str = chunk.split(":", 1)
+            try:
+                devices = int(devices_str.strip())
+            except ValueError:
+                logging.warning("Invalid DEVICE_PLANS tier devices skipped: %s", chunk)
+                continue
+            if devices <= 0:
+                continue
+            prices = [p.strip() for p in prices_str.split(",")]
+            tier_map: Dict[int, float] = {}
+            for idx, months in enumerate(DEVICE_PLAN_MONTHS):
+                if idx >= len(prices):
+                    break
+                value = prices[idx]
+                if not value:
+                    continue
+                try:
+                    price_val = int(float(value)) if as_int else float(value)
+                except ValueError:
+                    logging.warning("Invalid DEVICE_PLANS price '%s' in %s", value, chunk)
+                    continue
+                if price_val > 0:
+                    tier_map[months] = price_val
+            if tier_map:
+                plans[devices] = tier_map
+        return plans
+
+    @computed_field
+    @property
+    def device_plans_active(self) -> bool:
+        """True when device-tier subscriptions are enabled and configured."""
+        if not self.DEVICE_PLANS_ENABLED:
+            return False
+        if self.traffic_sale_mode:
+            return False
+        return bool(self._parse_device_plans(self.DEVICE_PLANS_RUB, as_int=False))
+
+    @computed_field
+    @property
+    def device_subscription_options(self) -> Dict[int, Dict[int, float]]:
+        """{devices: {months: rub_price}}, filtered by MONTH_*_ENABLED."""
+        result: Dict[int, Dict[int, float]] = {}
+        for devices, tier_map in self._parse_device_plans(self.DEVICE_PLANS_RUB, as_int=False).items():
+            filtered = {m: p for m, p in tier_map.items() if self._month_enabled(m)}
+            if filtered:
+                result[devices] = filtered
+        return result
+
+    @computed_field
+    @property
+    def device_stars_options(self) -> Dict[int, Dict[int, int]]:
+        """{devices: {months: stars_price}}, filtered by MONTH_*_ENABLED and STARS_ENABLED."""
+        if not self.STARS_ENABLED:
+            return {}
+        result: Dict[int, Dict[int, int]] = {}
+        for devices, tier_map in self._parse_device_plans(self.DEVICE_PLANS_STARS, as_int=True).items():
+            filtered = {m: int(p) for m, p in tier_map.items() if self._month_enabled(m)}
+            if filtered:
+                result[devices] = filtered
+        return result
+
+    @computed_field
+    @property
+    def device_tiers(self) -> List[int]:
+        """Sorted list of available device counts (e.g. [5, 10, 15])."""
+        return sorted(self.device_subscription_options.keys())
+
+    @computed_field
+    @property
+    def base_device_limit(self) -> Optional[int]:
+        """Smallest configured device tier; used as default for trial/bonus subs."""
+        tiers = self.device_tiers
+        return tiers[0] if tiers else None
+
+    def get_plan_price(self, devices: int, months: int) -> Optional[float]:
+        return self.device_subscription_options.get(devices, {}).get(months)
+
+    def get_plan_stars_price(self, devices: int, months: int) -> Optional[int]:
+        return self.device_stars_options.get(devices, {}).get(months)
+
+    def tier_monthly_rate(self, devices: int) -> Optional[float]:
+        """Canonical price-per-month for a tier, taken from its longest period.
+
+        Used for value-preserving day conversion when switching tiers; the
+        constant factor cancels in old/new ratios, so only relativity matters.
+        """
+        tier_map = self.device_subscription_options.get(devices)
+        if not tier_map:
+            return None
+        longest = max(tier_map.keys())
+        price = tier_map.get(longest)
+        if not price or longest <= 0:
+            return None
+        return float(price) / float(longest)
 
     @computed_field
     @property

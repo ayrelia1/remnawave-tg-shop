@@ -45,6 +45,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
     sale_mode = metadata.get("sale_mode") or ("traffic" if settings.traffic_sale_mode else "subscription")
     promo_code_id_str = metadata.get("promo_code_id")
     payment_db_id_str = metadata.get("payment_db_id")
+    device_limit_str = metadata.get("device_limit")
     auto_renew_subscription_id_str = metadata.get(
         "auto_renew_for_subscription_id")
 
@@ -318,6 +319,12 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
             logging.exception("Failed to persist YooKassa payment method from webhook")
 
         months_for_activation = int(subscription_months) if sale_mode != "traffic" else 0
+        device_limit_for_activation = None
+        if sale_mode != "traffic" and device_limit_str:
+            try:
+                device_limit_for_activation = int(float(device_limit_str))
+            except (TypeError, ValueError):
+                device_limit_for_activation = None
         try:
             activation_details = await subscription_service.activate_subscription(
                 session,
@@ -329,6 +336,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 provider="yookassa",
                 sale_mode=sale_mode,
                 traffic_gb=traffic_amount_gb if sale_mode == "traffic" else None,
+                device_limit=device_limit_for_activation,
             )
         except Exception:
             previous_status = payment_before_update.status if payment_before_update else "pending_yookassa"
@@ -395,6 +403,11 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
         user_lang = db_user.language_code if db_user and db_user.language_code else settings.DEFAULT_LANGUAGE
         _ = lambda key, **kwargs: i18n.gettext(user_lang, key, **kwargs)
 
+        days_total = (
+            max(0, (final_end_date_for_user - datetime.now(timezone.utc)).days)
+            if final_end_date_for_user else 0
+        )
+
         traffic_label = (
             str(int(traffic_amount_gb)) if float(traffic_amount_gb).is_integer() else f"{traffic_amount_gb:g}"
         )
@@ -460,6 +473,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 details_message = _(
                     "payment_successful_with_referral_bonus_full",
                     months=int(subscription_months),
+                    days=days_total,
                     base_end_date=base_subscription_end_date.strftime('%Y-%m-%d'),
                     bonus_days=applied_referee_bonus_days_from_referral,
                     final_end_date=final_end_date_for_user.strftime('%Y-%m-%d'),
@@ -470,6 +484,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 details_message = _(
                     "payment_successful_with_promo_full",
                     months=int(subscription_months),
+                    days=days_total,
                     bonus_days=applied_promo_bonus_days,
                     end_date=final_end_date_for_user.strftime('%Y-%m-%d'),
                     config_link=config_link_text,
@@ -478,6 +493,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 details_message = _(
                     "payment_successful_full",
                     months=int(subscription_months),
+                    days=days_total,
                     end_date=final_end_date_for_user.strftime('%Y-%m-%d'),
                     config_link=config_link_text,
                 )

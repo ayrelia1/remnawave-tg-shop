@@ -19,6 +19,8 @@ router = Router(name="user_subscription_payments_freekassa_router")
 from bot.handlers.user.subscription.payments_subscription import (
     ensure_panel_available_or_alert,
     resolve_fiat_offer_price_for_user,
+    parse_simple_offer,
+    offer_back_callback,
 )
 
 @router.callback_query(F.data.startswith("pay_fk:"))
@@ -59,10 +61,10 @@ async def pay_fk_callback_handler(
 
     try:
         _, data_payload = callback.data.split(":", 1)
-        parts = data_payload.split(":")
-        months = float(parts[0])
-        callback_price_rub = float(parts[1])
-        sale_mode = parts[2] if len(parts) > 2 else "subscription"
+        parsed = parse_simple_offer(data_payload)
+        if not parsed:
+            raise ValueError("bad offer payload")
+        devices, months, callback_price_rub, sale_mode = parsed
     except (ValueError, IndexError):
         logging.error(f"Invalid pay_fk data in callback: {callback.data}")
         try:
@@ -79,6 +81,7 @@ async def pay_fk_callback_handler(
         months=months,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        devices=devices,
     )
     if resolved_price_rub is None:
         logging.warning(
@@ -128,6 +131,7 @@ async def pay_fk_callback_handler(
         "subscription_duration_months": int(months),
         "provider": "freekassa",
         "promo_code_id": None,
+        "hwid_device_limit": devices if sale_mode != "traffic" else None,
     }
 
     try:
@@ -204,7 +208,7 @@ async def pay_fk_callback_handler(
                         location,
                         current_lang,
                         i18n,
-                        back_callback=f"subscribe_period:{human_value}",
+                        back_callback=offer_back_callback(devices, months),
                         back_text_key="back_to_payment_methods_button",
                     ),
                     disable_web_page_preview=False,

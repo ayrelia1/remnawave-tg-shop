@@ -374,11 +374,20 @@ class SubscriptionService:
                 "message_key": "trial_activation_failed_db",
             }
 
+        # Trial gets the base tariff device limit (e.g. 5 devices) on the panel.
+        # We push it to the panel for enforcement/display, but intentionally keep
+        # the local subscription's hwid_device_limit NULL so a later purchase is
+        # treated as a plain renewal (stack), not a tier switch with conversion.
+        trial_device_limit = self.settings.USER_HWID_DEVICE_LIMIT
+        if self.settings.device_plans_active and self.settings.base_device_limit:
+            trial_device_limit = self.settings.base_device_limit
+
         panel_update_payload = self._build_panel_update_payload(
             panel_user_uuid=panel_user_uuid,
             expire_at=end_date,
             status="ACTIVE",
             traffic_limit_bytes=self.settings.trial_traffic_limit_bytes,
+            hwid_device_limit=trial_device_limit,
         )
 
         # Add user description based on Telegram profile
@@ -544,6 +553,7 @@ class SubscriptionService:
         provider: str = "yookassa",
         sale_mode: str = "subscription",
         traffic_gb: Optional[float] = None,
+        device_limit: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
 
         if sale_mode == "traffic" or getattr(self.settings, "traffic_sale_mode", False):
@@ -582,17 +592,57 @@ class SubscriptionService:
         current_active_sub = await subscription_dal.get_active_subscription_by_user_id(
             session, user_id, panel_user_uuid
         )
-        start_date = datetime.now(timezone.utc)
-        if (
+        now_utc = datetime.now(timezone.utc)
+
+        # Resolve the device tier for this purchase. In legacy single-tier mode
+        # device_limit stays None and the panel keeps its global hwidDeviceLimit.
+        effective_device_limit = device_limit
+        if effective_device_limit is None and self.settings.device_plans_active:
+            effective_device_limit = self.settings.base_device_limit
+
+        has_remaining = bool(
             current_active_sub
             and current_active_sub.end_date
-            and current_active_sub.end_date > start_date
-        ):
-            start_date = current_active_sub.end_date
+            and current_active_sub.end_date > now_utc
+        )
+        purchased_days = (add_months(now_utc, months_int) - now_utc).days
 
-        # base duration by months
-        end_after_months = add_months(start_date, months_int)
-        duration_days_total = (end_after_months - start_date).days
+        if has_remaining:
+            # Only a *recorded* paid tariff counts as the "old tier". Trial/bonus/
+            # legacy subscriptions have no tariff (NULL) -> not a switch, just stack.
+            old_tier = current_active_sub.hwid_device_limit
+            is_tier_switch = bool(
+                self.settings.device_plans_active
+                and effective_device_limit
+                and old_tier
+                and int(old_tier) != int(effective_device_limit)
+            )
+            if is_tier_switch:
+                # Value-preserving conversion: the remaining days of the old tier
+                # are converted by cost into the new tier, then the purchased
+                # period is added on top. No surcharge/refund (no balance).
+                remaining_days = max(0, (current_active_sub.end_date - now_utc).days)
+                rate_old = self.settings.tier_monthly_rate(int(old_tier))
+                rate_new = self.settings.tier_monthly_rate(int(effective_device_limit))
+                if rate_old and rate_new:
+                    converted_days = int(round(remaining_days * rate_old / rate_new))
+                else:
+                    converted_days = remaining_days
+                start_date = now_utc
+                duration_days_total = converted_days + purchased_days
+                logging.info(
+                    "Tier switch for user %s: %s->%s devices, remaining %sd -> "
+                    "converted %sd + %sd purchased",
+                    user_id, old_tier, effective_device_limit,
+                    remaining_days, converted_days, purchased_days,
+                )
+            else:
+                # Same tier (or legacy mode): stack time on top of remaining.
+                start_date = current_active_sub.end_date
+                duration_days_total = (add_months(start_date, months_int) - start_date).days
+        else:
+            start_date = now_utc
+            duration_days_total = purchased_days
         applied_promo_bonus_days = 0
 
         if promo_code_id_from_payment:
@@ -651,6 +701,7 @@ class SubscriptionService:
             "provider": provider,
             "skip_notifications": False,
             "auto_renew_enabled": auto_renew_should_enable,
+            "hwid_device_limit": effective_device_limit,
         }
         try:
             new_or_updated_sub = await subscription_dal.upsert_subscription(
@@ -668,6 +719,7 @@ class SubscriptionService:
             expire_at=final_end_date,
             status="ACTIVE",
             traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
+            hwid_device_limit=effective_device_limit,
         )
 
         # Add user description based on Telegram profile
@@ -715,6 +767,7 @@ class SubscriptionService:
             "panel_short_uuid": final_panel_short_uuid,
             "subscription_url": final_subscription_url,
             "applied_promo_bonus_days": applied_promo_bonus_days,
+            "device_limit": effective_device_limit,
         }
 
     async def extend_active_subscription_days(
@@ -773,6 +826,7 @@ class SubscriptionService:
                 "status_from_panel": "ACTIVE_BONUS",
                 "traffic_limit_bytes": traffic_limit,
                 "auto_renew_enabled": False,
+                "hwid_device_limit": self.settings.base_device_limit,
             }
             await subscription_dal.deactivate_other_active_subscriptions(
                 session, panel_uuid, panel_sub_uuid
@@ -1002,9 +1056,19 @@ class SubscriptionService:
             return False
 
         months = sub.duration_months or 1
-        amount = self.settings.subscription_options.get(months)
+        renew_device_limit: Optional[int] = None
+        if self.settings.device_plans_active:
+            renew_device_limit = sub.hwid_device_limit or self.settings.base_device_limit
+            amount = (
+                self.settings.get_plan_price(int(renew_device_limit), int(months))
+                if renew_device_limit else None
+            )
+        else:
+            amount = self.settings.subscription_options.get(months)
         if not amount:
-            logging.error(f"Auto-renew price missing for {months} months")
+            logging.error(
+                f"Auto-renew price missing for {months} months / {renew_device_limit} devices"
+            )
             return False
 
         payment_description = f"Auto-renewal for {months} months"
@@ -1018,6 +1082,7 @@ class SubscriptionService:
                 "description": payment_description,
                 "subscription_duration_months": int(months),
                 "provider": "yookassa",
+                "hwid_device_limit": renew_device_limit,
             },
         )
 
@@ -1027,6 +1092,8 @@ class SubscriptionService:
             "subscription_months": str(months),
             "payment_db_id": str(payment_record.payment_id),
         }
+        if renew_device_limit is not None:
+            metadata["device_limit"] = str(renew_device_limit)
         resp = await yk.create_payment(
             amount=float(amount),
             currency="RUB",
@@ -1080,6 +1147,7 @@ class SubscriptionService:
         traffic_limit_bytes: Optional[int] = None,
         include_uuid: bool = True,
         traffic_limit_strategy: Optional[str] = None,
+        hwid_device_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
         if include_uuid and panel_user_uuid:
@@ -1091,8 +1159,140 @@ class SubscriptionService:
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
             payload["trafficLimitStrategy"] = traffic_limit_strategy or self.settings.USER_TRAFFIC_STRATEGY
+        if hwid_device_limit is not None:
+            try:
+                hwid_int = int(hwid_device_limit)
+                if hwid_int >= 0:
+                    payload["hwidDeviceLimit"] = hwid_int
+            except (TypeError, ValueError):
+                pass
         if self.settings.parsed_user_squad_uuids:
             payload["activeInternalSquads"] = self.settings.parsed_user_squad_uuids
         if self.settings.parsed_user_external_squad_uuid:
             payload["externalSquadUuid"] = self.settings.parsed_user_external_squad_uuid
         return payload
+
+    def _resolve_subscription_tier(self, sub: Optional[Subscription]) -> Optional[int]:
+        if sub is None:
+            return None
+        return sub.hwid_device_limit or self.settings.base_device_limit
+
+    async def compute_switch_preview(
+        self, session: AsyncSession, user_id: int, target_devices: int, months: int
+    ) -> Dict[str, Any]:
+        """Preview the effect of buying (target_devices, months) for the user.
+
+        Mirrors the value-preserving conversion done in activate_subscription so
+        the bot can warn the user before payment. No panel calls, local data only.
+
+        direction: 'new' (no active sub) | 'same' (same tier, time stacks) |
+                   'upgrade' / 'downgrade' (tier change, days recalculated).
+        """
+        now = datetime.now(timezone.utc)
+        active = await subscription_dal.get_active_subscription_by_user_id(session, user_id)
+        purchased_days = (add_months(now, int(months)) - now).days
+
+        if not active or not active.end_date or active.end_date <= now:
+            return {
+                "has_active": False,
+                "current_devices": None,
+                "remaining_days": 0,
+                "converted_days": 0,
+                "purchased_days": purchased_days,
+                "total_days": purchased_days,
+                "projected_end_date": now + timedelta(days=purchased_days),
+                "direction": "new",
+            }
+
+        # Only a recorded paid tariff counts; trial/bonus/legacy (NULL) -> treat
+        # the purchase as a plain renewal (stack), not a tier switch.
+        old_tier = active.hwid_device_limit
+        remaining_days = max(0, (active.end_date - now).days)
+
+        if (
+            not self.settings.device_plans_active
+            or not old_tier
+            or int(old_tier) == int(target_devices)
+        ):
+            total = remaining_days + purchased_days
+            return {
+                "has_active": True,
+                "current_devices": old_tier,
+                "remaining_days": remaining_days,
+                "converted_days": remaining_days,
+                "purchased_days": purchased_days,
+                "total_days": total,
+                "projected_end_date": now + timedelta(days=total),
+                "direction": "same",
+            }
+
+        rate_old = self.settings.tier_monthly_rate(int(old_tier))
+        rate_new = self.settings.tier_monthly_rate(int(target_devices))
+        if rate_old and rate_new:
+            converted = int(round(remaining_days * rate_old / rate_new))
+        else:
+            converted = remaining_days
+        total = converted + purchased_days
+        direction = "upgrade" if (rate_new or 0) > (rate_old or 0) else "downgrade"
+        return {
+            "has_active": True,
+            "current_devices": old_tier,
+            "remaining_days": remaining_days,
+            "converted_days": converted,
+            "purchased_days": purchased_days,
+            "total_days": total,
+            "projected_end_date": now + timedelta(days=total),
+            "direction": direction,
+        }
+
+    async def set_subscription_device_limit(
+        self, session: AsyncSession, user_id: int, device_limit: int
+    ) -> bool:
+        """Admin override: set the device tier on the user's active subscription.
+
+        Updates the local record and pushes hwidDeviceLimit to the panel. Does NOT
+        touch the end date (no day conversion) — this is a manual grant, not a sale.
+        """
+        user = await user_dal.get_user_by_id(session, user_id)
+        if not user:
+            return False
+        panel_uuid, _panel_sub_uuid, _short, _created = (
+            await self._get_or_create_panel_user_link_details(session, user_id, user)
+        )
+        if not panel_uuid:
+            return False
+        active_sub = await subscription_dal.get_active_subscription_by_user_id(
+            session, user_id, panel_uuid
+        )
+        if not active_sub:
+            return False
+        try:
+            await subscription_dal.update_subscription(
+                session, active_sub.subscription_id, {"hwid_device_limit": int(device_limit)}
+            )
+            panel_payload = self._build_panel_update_payload(
+                panel_user_uuid=panel_uuid,
+                hwid_device_limit=int(device_limit),
+            )
+            updated = await self.panel_service.update_user_details_on_panel(
+                panel_uuid, panel_payload
+            )
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            logging.error(
+                "Failed to set device limit %s for user %s: %s",
+                device_limit, user_id, exc, exc_info=True,
+            )
+            return False
+        if isinstance(updated, dict) and updated.get("error"):
+            return False
+        return bool(updated)
+
+    def is_switch_allowed(self, direction: str) -> bool:
+        """Check tariff-switch direction flags. 'same'/'new' are always allowed."""
+        if direction == "upgrade":
+            return bool(self.settings.TARIFF_SWITCH_UPGRADE_ENABLED)
+        if direction == "downgrade":
+            return bool(self.settings.TARIFF_SWITCH_DOWNGRADE_ENABLED)
+        return True

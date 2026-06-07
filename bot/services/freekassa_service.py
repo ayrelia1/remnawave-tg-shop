@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
@@ -377,6 +377,7 @@ class FreeKassaService:
                     provider="freekassa",
                     sale_mode=sale_mode,
                     traffic_gb=months if sale_mode == "traffic" else None,
+                    device_limit=payment.hwid_device_limit if sale_mode != "traffic" else None,
                 )
                 if not activation or not activation.get("end_date"):
                     raise RuntimeError(
@@ -422,6 +423,7 @@ class FreeKassaService:
                 end_date_str = final_end.strftime("%Y-%m-%d")
             else:
                 end_date_str = _("config_link_not_available")
+            days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
 
             traffic_label = str(int(months)) if float(months).is_integer() else f"{months:g}"
 
@@ -443,6 +445,7 @@ class FreeKassaService:
                 text = _(
                     "payment_successful_with_referral_bonus_full",
                     months=months,
+                    days=days_total,
                     base_end_date=activation["end_date"].strftime("%Y-%m-%d") if activation and activation.get("end_date") else end_date_str,
                     bonus_days=applied_days,
                     final_end_date=end_date_str,
@@ -453,6 +456,7 @@ class FreeKassaService:
                 text = _(
                     "payment_successful_full",
                     months=months,
+                    days=days_total,
                     end_date=end_date_str,
                     config_link=config_link_text,
                 )

@@ -78,6 +78,9 @@ class Subscription(Base):
     provider = Column(String, nullable=True)
     skip_notifications = Column(Boolean, default=False)
     auto_renew_enabled = Column(Boolean, default=True, index=True)
+    # Device tier (hwidDeviceLimit) this subscription was purchased at.
+    # NULL on legacy rows -> treated as the base device tier at read time.
+    hwid_device_limit = Column(Integer, nullable=True)
 
     user = relationship("User", back_populates="subscriptions")
 
@@ -110,6 +113,8 @@ class Payment(Base):
     status = Column(String, nullable=False, index=True)
     description = Column(String, nullable=True)
     subscription_duration_months = Column(Integer, nullable=True)
+    # Device tier (hwidDeviceLimit) this payment was made for, if applicable.
+    hwid_device_limit = Column(Integer, nullable=True)
     promo_code_id = Column(Integer,
                            ForeignKey("promo_codes.promo_code_id"),
                            nullable=True)

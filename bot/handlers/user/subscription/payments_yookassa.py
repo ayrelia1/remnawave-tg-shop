@@ -29,15 +29,30 @@ def _format_value(val: float) -> str:
     return str(int(val)) if float(val).is_integer() else f"{val:g}"
 
 
-def _parse_offer_payload(payload: str) -> Optional[Tuple[float, float, str]]:
+def _parse_offer_payload(payload: str) -> Optional[Tuple[Optional[int], float, float, str]]:
+    """Parse offer payload. Device-tier offers are 4-part (devices:months:price:mode);
+    legacy/traffic offers are 3-part (value:price:mode)."""
     try:
         parts = payload.split(":")
-        value = float(parts[0])
-        price = float(parts[1])
-        sale_mode = parts[2] if len(parts) > 2 else "subscription"
-        return value, price, sale_mode
+        if len(parts) >= 4:
+            devices: Optional[int] = int(float(parts[0]))
+            value = float(parts[1])
+            price = float(parts[2])
+            sale_mode = parts[3]
+        else:
+            devices = None
+            value = float(parts[0])
+            price = float(parts[1])
+            sale_mode = parts[2] if len(parts) > 2 else "subscription"
+        return devices, value, price, sale_mode
     except (ValueError, IndexError):
         return None
+
+
+def _offer_back_callback(devices: Optional[int], months: float) -> str:
+    if devices is not None:
+        return f"subscribe_period:{int(devices)}:{_format_value(months)}"
+    return f"subscribe_period:{_format_value(months)}"
 
 
 def _format_saved_payment_method_title(get_text, network: Optional[str], last4: Optional[str], is_default: bool) -> str:
@@ -80,6 +95,7 @@ async def _initiate_yk_payment(
     payment_method_id: Optional[str] = None,
     selected_method_internal_id: Optional[int] = None,
     sale_mode: str = "subscription",
+    device_limit: Optional[int] = None,
 ) -> bool:
     """Create payment record and initiate YooKassa payment (new card or saved card)."""
     if not callback.message:
@@ -140,6 +156,7 @@ async def _initiate_yk_payment(
         "description": payment_description,
         "subscription_duration_months": int(months),
         "promo_code_id": active_promo_code_id,  # NEW: Link to promo code
+        "hwid_device_limit": device_limit if sale_mode != "traffic" else None,
     }
 
     db_payment_record = None
@@ -176,6 +193,8 @@ async def _initiate_yk_payment(
     }
     if sale_mode == "traffic":
         yookassa_metadata["traffic_gb"] = str(months)
+    elif device_limit is not None:
+        yookassa_metadata["device_limit"] = str(device_limit)
     if payment_method_id:
         yookassa_metadata["used_saved_payment_method_id"] = payment_method_id
 
@@ -414,7 +433,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return
 
-    months, callback_price_rub, sale_mode = parsed
+    devices, months, callback_price_rub, sale_mode = parsed
     user_id = callback.from_user.id
 
     resolved_price_rub = await resolve_fiat_offer_price_for_user(
@@ -424,6 +443,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
         months=months,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        devices=devices,
     )
     if resolved_price_rub is None:
         logging.warning(
@@ -480,6 +500,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
                     i18n,
                     has_saved_cards=True,
                     sale_mode=sale_mode,
+                    devices=devices,
                 ),
             )
         except Exception as e_edit:
@@ -494,6 +515,7 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
                         i18n,
                         has_saved_cards=True,
                         sale_mode=sale_mode,
+                        devices=devices,
                     ),
                 )
             except Exception as exc:
@@ -518,8 +540,9 @@ async def pay_yk_callback_handler(callback: types.CallbackQuery, settings: Setti
         price_rub=price_rub,
         currency_code_for_yk=currency_code_for_yk,
         save_payment_method=autopay_enabled and autopay_require_binding,
-        back_callback=f"subscribe_period:{_format_value(months)}",
+        back_callback=_offer_back_callback(devices, months),
         sale_mode=sale_mode,
+        device_limit=devices,
     )
     try:
         await callback.answer()
@@ -574,7 +597,7 @@ async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Setti
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return
 
-    months, callback_price_rub, sale_mode = parsed
+    devices, months, callback_price_rub, sale_mode = parsed
     user_id = callback.from_user.id
     resolved_price_rub = await resolve_fiat_offer_price_for_user(
         session=session,
@@ -583,6 +606,7 @@ async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Setti
         months=months,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        devices=devices,
     )
     if resolved_price_rub is None:
         logging.warning(
@@ -633,8 +657,9 @@ async def pay_yk_new_card_handler(callback: types.CallbackQuery, settings: Setti
         price_rub=price_rub,
         currency_code_for_yk=currency_code_for_yk,
         save_payment_method=autopay_enabled and autopay_require_binding,
-        back_callback=f"subscribe_period:{_format_value(months)}",
+        back_callback=_offer_back_callback(devices, months),
         sale_mode=sale_mode,
+        device_limit=devices,
     )
     try:
         await callback.answer()
@@ -674,11 +699,19 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return
 
+    device_mode = bool(settings.device_plans_active)
     try:
-        months = float(parts[0])
-        callback_price_rub = float(parts[1])
-        page = int(parts[2]) if len(parts) > 2 else 0
-        sale_mode = parts[3] if len(parts) > 3 else "subscription"
+        idx = 0
+        devices: Optional[int] = None
+        if device_mode:
+            devices = int(float(parts[idx]))
+            idx += 1
+        months = float(parts[idx]); idx += 1
+        callback_price_rub = float(parts[idx]); idx += 1
+        page = 0
+        if idx < len(parts) and parts[idx].lstrip("-").isdigit():
+            page = int(parts[idx]); idx += 1
+        sale_mode = parts[idx] if idx < len(parts) else "subscription"
     except (ValueError, IndexError):
         logging.error(f"pay_yk_saved_list payload parsing error: {callback.data}")
         try:
@@ -703,6 +736,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
         months=months,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        devices=devices,
     )
     if resolved_price_rub is None:
         logging.warning(
@@ -752,6 +786,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
                     i18n,
                     has_saved_cards=False,
                     sale_mode=sale_mode,
+                    devices=devices,
                 ),
             )
         except Exception as e_edit:
@@ -766,6 +801,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
                         i18n,
                         has_saved_cards=False,
                         sale_mode=sale_mode,
+                        devices=devices,
                     ),
                 )
             except Exception as exc:
@@ -798,6 +834,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
                 i18n,
                 page=page,
                 sale_mode=sale_mode,
+                devices=devices,
             ),
         )
     except Exception as e_edit:
@@ -813,6 +850,7 @@ async def pay_yk_saved_list_handler(callback: types.CallbackQuery, settings: Set
                     i18n,
                     page=page,
                     sale_mode=sale_mode,
+                    devices=devices,
                 ),
             )
         except Exception as exc:
@@ -870,10 +908,16 @@ async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Sett
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return
 
+    device_mode = bool(settings.device_plans_active)
     try:
-        months = float(parts[0])
-        callback_price_rub = float(parts[1])
-        sale_mode = parts[3] if len(parts) > 3 else "subscription"
+        idx = 0
+        devices: Optional[int] = None
+        if device_mode:
+            devices = int(float(parts[idx])); idx += 1
+        months = float(parts[idx]); idx += 1
+        callback_price_rub = float(parts[idx]); idx += 1
+        method_identifier = parts[idx]; idx += 1
+        sale_mode = parts[idx] if idx < len(parts) else "subscription"
     except (ValueError, IndexError):
         logging.error(f"pay_yk_use_saved months/price parsing error: {callback.data}")
         try:
@@ -890,7 +934,6 @@ async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Sett
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_yookassa.py: %s", exc)
         return
 
-    method_identifier = parts[2]
     user_id = callback.from_user.id
     resolved_price_rub = await resolve_fiat_offer_price_for_user(
         session=session,
@@ -899,6 +942,7 @@ async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Sett
         months=months,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        devices=devices,
     )
     if resolved_price_rub is None:
         logging.warning(
@@ -971,7 +1015,12 @@ async def pay_yk_use_saved_handler(callback: types.CallbackQuery, settings: Sett
         price_rub=price_rub,
         currency_code_for_yk=currency_code_for_yk,
         save_payment_method=False,
-        back_callback=f"pay_yk_saved_list:{_format_value(months)}:{price_rub}:{sale_mode}",
+        back_callback=(
+            f"pay_yk_saved_list:{int(devices)}:{_format_value(months)}:{price_rub}:{sale_mode}"
+            if devices is not None
+            else f"pay_yk_saved_list:{_format_value(months)}:{price_rub}:{sale_mode}"
+        ),
+        device_limit=devices,
         payment_method_id=selected_method.provider_payment_method_id,
         selected_method_internal_id=selected_method.method_id,
         sale_mode=sale_mode,

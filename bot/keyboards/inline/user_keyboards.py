@@ -244,15 +244,100 @@ def get_subscription_options_keyboard(subscription_options: Dict[
     return builder.as_markup()
 
 
+def _fmt_price(val: float) -> str:
+    return str(int(val)) if float(val).is_integer() else f"{val:g}"
+
+
+def get_device_tier_keyboard(tier_min_prices: Dict[int, float],
+                             currency_symbol_val: str, lang: str,
+                             i18n_instance) -> InlineKeyboardMarkup:
+    """First step of the device-plan flow: choose number of devices.
+
+    tier_min_prices maps device count -> its lowest (shortest period) price.
+    """
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    for devices in sorted(tier_min_prices.keys()):
+        builder.button(
+            text=_("subscribe_device_tier_button",
+                   devices=devices,
+                   price=_fmt_price(tier_min_prices[devices]),
+                   currency_symbol=currency_symbol_val),
+            callback_data=f"subscribe_tier:{devices}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+        )
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="back_to_main_menu_button"),
+            callback_data="main_action:back_to_main",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
+    return builder.as_markup()
+
+
+def get_subscription_period_keyboard(devices: int, tier_options: Dict[int, float],
+                                     currency_symbol_val: str, lang: str,
+                                     i18n_instance) -> InlineKeyboardMarkup:
+    """Second step of the device-plan flow: choose duration for a chosen tier."""
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    for months in sorted(tier_options.keys()):
+        price = tier_options[months]
+        if price is None:
+            continue
+        builder.button(
+            text=_("subscribe_for_months_button",
+                   months=months,
+                   price=_fmt_price(price),
+                   currency_symbol=currency_symbol_val),
+            callback_data=f"subscribe_period:{int(devices)}:{months}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+        )
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="back_to_device_tiers_button"),
+            callback_data="main_action:subscribe",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
+    return builder.as_markup()
+
+
+def get_tariff_switch_confirm_keyboard(devices: int, months: int, lang: str,
+                                       i18n_instance) -> InlineKeyboardMarkup:
+    """Confirmation keyboard shown before paying when switching to a different tier."""
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=_(key="tariff_switch_continue_button"),
+        callback_data=f"confirm_switch:{int(devices)}:{int(months)}",
+        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
+    )
+    builder.button(
+        text=_(key="back_to_device_tiers_button"),
+        callback_data="main_action:subscribe",
+        icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def get_payment_method_keyboard(months: int, price: float,
                                 stars_price: Optional[int],
                                 currency_symbol_val: str, lang: str,
-                                i18n_instance, settings: Settings, sale_mode: str = "subscription") -> InlineKeyboardMarkup:
+                                i18n_instance, settings: Settings, sale_mode: str = "subscription",
+                                devices: Optional[int] = None) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
     def _format_value(val: float) -> str:
         return str(int(val)) if float(val).is_integer() else f"{val:g}"
-    value_str = _format_value(months)
+    months_str = _format_value(months)
+    # Device-tier offers prepend the device count, yielding a 4-part payload
+    # (devices:months:price:mode); legacy/traffic keep the 3-part form.
+    value_str = f"{int(devices)}:{months_str}" if devices is not None else months_str
     mode_suffix = f":{sale_mode}"
     for method in settings.payment_methods_order:
         if method == "severpay" and getattr(settings, "SEVERPAY_ENABLED", False):
@@ -336,6 +421,7 @@ def get_yk_autopay_choice_keyboard(
     i18n_instance,
     has_saved_cards: bool = True,
     sale_mode: str = "subscription",
+    devices: Optional[int] = None,
 ) -> InlineKeyboardMarkup:
     """Keyboard for choosing between saved card charge or new card payment when auto-renew is enabled."""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
@@ -343,7 +429,8 @@ def get_yk_autopay_choice_keyboard(
     price_str = str(price)
     def _format_value(val: float) -> str:
         return str(int(val)) if float(val).is_integer() else f"{val:g}"
-    value_str = _format_value(months)
+    months_str = _format_value(months)
+    value_str = f"{int(devices)}:{months_str}" if devices is not None else months_str
     suffix = f":{sale_mode}"
     if has_saved_cards:
         builder.row(
@@ -378,6 +465,7 @@ def get_yk_saved_cards_keyboard(
     i18n_instance,
     page: int = 0,
     sale_mode: str = "subscription",
+    devices: Optional[int] = None,
 ) -> InlineKeyboardMarkup:
     """Paginated keyboard for selecting a saved YooKassa card."""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
@@ -389,7 +477,8 @@ def get_yk_saved_cards_keyboard(
     price_str = str(price)
     def _format_value(val: float) -> str:
         return str(int(val)) if float(val).is_integer() else f"{val:g}"
-    value_str = _format_value(months)
+    months_str = _format_value(months)
+    value_str = f"{int(devices)}:{months_str}" if devices is not None else months_str
     suffix = f":{sale_mode}"
 
     for method_id, title in cards[start:end]:

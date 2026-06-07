@@ -17,6 +17,8 @@ router = Router(name="user_subscription_payments_crypto_router")
 from bot.handlers.user.subscription.payments_subscription import (
     ensure_panel_available_or_alert,
     resolve_fiat_offer_price_for_user,
+    parse_simple_offer,
+    offer_back_callback,
 )
 
 @router.callback_query(F.data.startswith("pay_crypto:"))
@@ -52,10 +54,10 @@ async def pay_crypto_callback_handler(
 
     try:
         _, data_payload = callback.data.split(":", 1)
-        parts = data_payload.split(":")
-        months = float(parts[0])
-        callback_price_amount = float(parts[1])
-        sale_mode = parts[2] if len(parts) > 2 else "subscription"
+        parsed = parse_simple_offer(data_payload)
+        if not parsed:
+            raise ValueError("bad offer payload")
+        devices, months, callback_price_amount, sale_mode = parsed
     except (ValueError, IndexError):
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
@@ -71,6 +73,7 @@ async def pay_crypto_callback_handler(
         months=months,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        devices=devices,
     )
     if resolved_price_amount is None:
         logging.warning(
@@ -116,6 +119,7 @@ async def pay_crypto_callback_handler(
         description=payment_description,
         sale_mode=sale_mode,
         promo_code_service=promo_code_service,
+        device_limit=devices,
     )
 
     if invoice_url:
@@ -130,7 +134,7 @@ async def pay_crypto_callback_handler(
                     invoice_url,
                     current_lang,
                     i18n,
-                    back_callback=f"subscribe_period:{human_value}",
+                    back_callback=offer_back_callback(devices, months),
                     back_text_key="back_to_payment_methods_button",
                 ),
                 disable_web_page_preview=False,
