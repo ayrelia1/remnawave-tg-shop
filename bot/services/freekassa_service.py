@@ -497,6 +497,7 @@ class FreeKassaService:
                     traffic_gb=months if sale_mode == "traffic" else None,
                     payment_provider="freekassa",
                     username=db_user.username if db_user else None,
+                    device_limit=payment.hwid_device_limit if sale_mode != "traffic" else None,
                 )
             except Exception as e:
                 logging.error(f"FreeKassa notification: failed to notify admins: {e}")

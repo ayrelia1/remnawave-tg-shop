@@ -536,6 +536,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 payment_provider="yookassa",  # This is specifically for YooKassa webhook
                 username=user.username if user else None,
                 traffic_gb=traffic_amount_gb if sale_mode == "traffic" else None,
+                device_limit=device_limit_for_activation if sale_mode != "traffic" else None,
             )
         except Exception as e:
             logging.error(f"Failed to send payment notification: {e}")

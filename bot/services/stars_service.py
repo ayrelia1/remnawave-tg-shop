@@ -306,6 +306,7 @@ class StarsService:
                 payment_provider="stars",
                 username=user.username if user else None,
                 traffic_gb=months if sale_mode == "traffic" else None,
+                device_limit=device_limit_from_payment if sale_mode != "traffic" else None,
             )
         except Exception as e:
             logging.error(f"Failed to send stars payment notification: {e}")

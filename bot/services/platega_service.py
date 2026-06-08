@@ -388,6 +388,7 @@ class PlategaService:
                         traffic_gb=payment_months if sale_mode == "traffic" else None,
                         payment_provider="platega",
                         username=db_user.username if db_user else None,
+                        device_limit=payment.hwid_device_limit if sale_mode != "traffic" else None,
                     )
                 except Exception as exc:
                     logging.error("Platega webhook: failed to notify admins: %s", exc)

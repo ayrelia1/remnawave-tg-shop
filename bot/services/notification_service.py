@@ -232,29 +232,37 @@ class NotificationService:
         await self._send_to_log_channel(message, thread_id=self._thread_id_for("users"), reply_markup=profile_keyboard)
 
     async def notify_payment_received(self, user_id: int, amount: float, currency: str,
-                                    months: int, payment_provider: str, 
+                                    months: int, payment_provider: str,
                                     username: Optional[str] = None,
-                                    traffic_gb: Optional[float] = None):
+                                    traffic_gb: Optional[float] = None,
+                                    device_limit: Optional[int] = None):
         """Send notification about successful payment"""
         if not self.settings.LOG_PAYMENTS:
             return
-        
+
         admin_lang = self.settings.DEFAULT_LANGUAGE
         _ = lambda k, **kw: self.i18n.gettext(admin_lang, k, **kw) if self.i18n else k
-        
+
         user_display = self._format_user_display(
             user_id=user_id,
             username=username,
         )
-        
+
         provider_emoji = {
             "yookassa": "💳",
             "freekassa": "💳",
             "cryptopay": "₿",
+            "crypto_pay": "₿",
             "stars": "⭐",
             "platega": "💳",
             "severpay": "💳",
         }.get(payment_provider.lower(), "💰")
+
+        # Tier line (e.g. "📱 Тариф: 5 устройств"). Only shown for device-based
+        # plans; traffic packages and legacy time plans pass device_limit=None.
+        tariff_text = ""
+        if device_limit is not None and device_limit > 0:
+            tariff_text = _("log_payment_tariff_suffix", device_limit=device_limit)
 
         if traffic_gb is not None:
             traffic_label = str(int(traffic_gb)) if float(traffic_gb).is_integer() else f"{traffic_gb:g}"
@@ -276,6 +284,7 @@ class NotificationService:
                 amount=amount,
                 currency=currency,
                 months=months,
+                tariff_text=tariff_text,
                 payment_provider=payment_provider,
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             )

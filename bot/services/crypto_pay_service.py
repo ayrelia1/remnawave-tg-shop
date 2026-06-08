@@ -380,7 +380,8 @@ class CryptoPayService:
                     months=int(months) if sale_mode != "traffic" else 0,
                     traffic_gb=traffic_gb if sale_mode == "traffic" else None,
                     payment_provider="crypto_pay",
-                    username=user.username if user else None
+                    username=user.username if user else None,
+                    device_limit=device_limit if sale_mode != "traffic" else None,
                 )
             except Exception as e:
                 logging.error(f"Failed to send crypto_pay payment notification: {e}")
