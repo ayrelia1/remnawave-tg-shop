@@ -348,6 +348,10 @@ class SubscriptionService:
             session, panel_user_uuid, panel_sub_link_id
         )
 
+        trial_device_limit = self.settings.USER_HWID_DEVICE_LIMIT
+        if self.settings.device_plans_active and self.settings.base_device_limit:
+            trial_device_limit = self.settings.base_device_limit
+
         trial_sub_data = {
             "user_id": user_id,
             "panel_user_uuid": panel_user_uuid,
@@ -359,6 +363,7 @@ class SubscriptionService:
             "status_from_panel": "TRIAL",
             "traffic_limit_bytes": self.settings.trial_traffic_limit_bytes,
             "auto_renew_enabled": False,
+            "hwid_device_limit": trial_device_limit,
         }
         try:
             await subscription_dal.upsert_subscription(session, trial_sub_data)
@@ -373,14 +378,6 @@ class SubscriptionService:
                 "activated": False,
                 "message_key": "trial_activation_failed_db",
             }
-
-        # Trial gets the base tariff device limit (e.g. 5 devices) on the panel.
-        # We push it to the panel for enforcement/display, but intentionally keep
-        # the local subscription's hwid_device_limit NULL so a later purchase is
-        # treated as a plain renewal (stack), not a tier switch with conversion.
-        trial_device_limit = self.settings.USER_HWID_DEVICE_LIMIT
-        if self.settings.device_plans_active and self.settings.base_device_limit:
-            trial_device_limit = self.settings.base_device_limit
 
         panel_update_payload = self._build_panel_update_payload(
             panel_user_uuid=panel_user_uuid,
