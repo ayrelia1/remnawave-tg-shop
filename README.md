@@ -113,6 +113,7 @@
     | `PLATEGA_PAYMENT_METHOD` | ID способа оплаты (2 — SBP QR, 10 — РФ карты, 12 — международные карты, 13 — crypto). |
     | `PLATEGA_RETURN_URL` | (Опционально) URL редиректа после успешной оплаты. По умолчанию ссылка на бота. |
     | `PLATEGA_FAILED_URL` | (Опционально) URL редиректа при ошибке/отмене. По умолчанию как `PLATEGA_RETURN_URL`. |
+    | `PLATEGA_CLIENT_COMMISSION_PERCENT` | Комиссия в %, которую платит клиент (как настроено в кабинете Platega). Например `5.5`: тариф 129 ₽ придёт в вебхуке как 136.10 ₽. Если комиссию платит мерчант — оставьте `0`. |
     | `SEVERPAY_ENABLED` | Включить/выключить SeverPay (`true`/`false`). |
     | `SEVERPAY_MID` | MID магазина в SeverPay. |
     | `SEVERPAY_TOKEN` | Секрет/токен для подписи запросов SeverPay. |

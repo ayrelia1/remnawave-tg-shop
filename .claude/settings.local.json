@@ -10,7 +10,8 @@
       "Bash(curl *)",
       "WebSearch",
       "Bash(python3 *)",
-      "Bash(pip3 list *)"
+      "Bash(pip3 list *)",
+      "WebFetch(domain:f.docs.rw)"
     ]
   }
 }

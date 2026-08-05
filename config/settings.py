@@ -113,6 +113,14 @@ class Settings(BaseSettings):
     )
     PLATEGA_RETURN_URL: Optional[str] = Field(default=None)
     PLATEGA_FAILED_URL: Optional[str] = Field(default=None)
+    PLATEGA_CLIENT_COMMISSION_PERCENT: float = Field(
+        default=0.0,
+        description=(
+            "Platega commission in percent paid by the client on top of the order price "
+            "(must match the merchant cabinet setting). Used to accept webhooks whose "
+            "amount is higher than the tariff price, e.g. 129 RUB -> 136.10 RUB at 5.5%."
+        ),
+    )
 
     FREEKASSA_ENABLED: bool = Field(default=False)
     FREEKASSA_MERCHANT_ID: Optional[str] = None
@@ -802,6 +810,26 @@ class Settings(BaseSettings):
             v = v.strip()
             if not v:
                 return None
+        return v
+
+    @field_validator('PLATEGA_CLIENT_COMMISSION_PERCENT', mode='before')
+    @classmethod
+    def validate_platega_client_commission(cls, v):
+        if v is None:
+            return 0.0
+        if isinstance(v, str):
+            v = v.strip().replace(",", ".").rstrip("%").strip()
+            if not v:
+                return 0.0
+        return v
+
+    @field_validator('PLATEGA_CLIENT_COMMISSION_PERCENT')
+    @classmethod
+    def check_platega_client_commission_range(cls, v):
+        if v < 0 or v >= 100:
+            raise ValueError(
+                "PLATEGA_CLIENT_COMMISSION_PERCENT must be a percentage in range [0, 100)."
+            )
         return v
 
     @field_validator('YOOKASSA_PAYMENT_MODE', 'YOOKASSA_PAYMENT_SUBJECT', mode='before')
