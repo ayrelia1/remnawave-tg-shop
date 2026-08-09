@@ -7,7 +7,7 @@ from sqlalchemy import update, or_
 from datetime import datetime, timezone
 
 from config.settings import Settings
-from bot.services.panel_api_service import PanelApiService
+from bot.services.panel_api_service import PanelApiService, extract_panel_user_ref
 from bot.services.notification_service import NotificationService
 
 from db.dal import user_dal, subscription_dal, panel_sync_dal
@@ -71,16 +71,16 @@ async def perform_sync(
         for panel_user_dict in panel_users_data:
             try:
                 panel_records_checked += 1
-                panel_uuid = panel_user_dict.get("uuid")
+                panel_uuid = extract_panel_user_ref(panel_user_dict)
                 panel_subscription_uuid = panel_user_dict.get("subscriptionUuid") or panel_user_dict.get(
                     "shortUuid"
                 )
                 telegram_id_from_panel = panel_user_dict.get("telegramId")
 
                 if not panel_uuid:
-                    sync_errors.append(f"Panel user missing UUID: {panel_user_dict}")
+                    sync_errors.append(f"Panel user missing id: {panel_user_dict}")
                     logging.warning(
-                        f"Skipping panel user without UUID: {panel_user_dict}"
+                        f"Skipping panel user without id: {panel_user_dict}"
                     )
                     continue
 
@@ -167,13 +167,19 @@ async def perform_sync(
                 # Get the actual user_id for subscription operations
                 actual_user_id = existing_user.user_id
 
-                # Update panel UUID if different
+                # Update panel reference if different
                 if existing_user.panel_user_uuid != panel_uuid:
                     existing_user.panel_user_uuid = panel_uuid
                     user_was_updated = True
                     users_uuid_updated += 1
+                    # Carry the user's subscription rows over to the new reference,
+                    # otherwise reference-filtered lookups below miss them (this is
+                    # what happens to every row after a 2.x -> 3.x panel upgrade).
+                    await subscription_dal.rebind_panel_user_reference(
+                        session, actual_user_id, panel_uuid
+                    )
                     logging.info(
-                        f"Updated panel UUID for user {actual_user_id}: {panel_uuid}"
+                        f"Updated panel reference for user {actual_user_id}: {panel_uuid}"
                     )
 
                 # Ensure panel description contains Telegram fields
@@ -336,7 +342,7 @@ async def perform_sync(
 
             except Exception as e_user:
                 sync_errors.append(
-                    f"Error processing panel user {panel_user_dict.get('uuid', 'unknown')}: {str(e_user)}"
+                    f"Error processing panel user {extract_panel_user_ref(panel_user_dict) or 'unknown'}: {str(e_user)}"
                 )
                 logging.error(f"Error syncing user: {e_user}")
 

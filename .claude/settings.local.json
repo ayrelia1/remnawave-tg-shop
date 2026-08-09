@@ -11,7 +11,10 @@
       "WebSearch",
       "Bash(python3 *)",
       "Bash(pip3 list *)",
-      "WebFetch(domain:f.docs.rw)"
+      "WebFetch(domain:f.docs.rw)",
+      "Bash(grep -n \"_request\\\\|def \\\\|f\\\\\"/\\\\|'/\\\\|\\\\\"/\" bot/services/panel_api_service.py)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh release *)"
     ]
   }
 }

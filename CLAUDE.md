@@ -87,6 +87,26 @@ Six providers supported, each toggled by `{PROVIDER}_ENABLED=true` in .env:
 
 The bot provisions VPN access by calling the Remnawave panel REST API (`PANEL_API_URL` + `PANEL_API_KEY`). Users are registered and subscriptions created/extended via `bot/services/panel_api_service.py`. The panel can also send webhook events back to `/webhook/panel`.
 
+**Target API version: Remnawave 3.x (verified against 3.2.1).** Contract source of truth: `libs/contract/` in [remnawave/backend](https://github.com/remnawave/backend/tree/3.2.1/libs/contract). Key facts a change here must respect:
+
+- **Users are identified by a numeric `id`; `User.uuid` no longer exists** (dropped in 3.0). `extract_panel_user_ref()` reads `id` and falls back to `uuid`, `panel_user_id()` coerces a stored reference to the int the API needs and returns `None` for legacy UUIDs. The DB column is still named `panel_user_uuid` and holds this reference as an opaque string.
+- **Removed routes**: `/users/by-telegram-id`, `/users/by-email`, `/users/by-tag`, `/users/by-id`, `/system/tools/happ/encrypt` (gone since 2.8.0, so `CRYPT4_ENABLED` is dead on 2.8+). Lookups by telegramId/email now go through `GET /users/stream`, which takes them as first-class indexed query filters and paginates by cursor. `by-username` and `by-short-uuid` survive.
+- `PATCH /api/users` identifies the user by `id` (or `username`) in the body — the identity is injected by `update_user_details_on_panel`, so `_build_panel_update_payload` must not add one.
+- HWID bodies take `userId`, not `userUuid`; `POST /hwid/devices/delete-all` replaces the per-device loop.
+- ~43 endpoints (every `DELETE`, async bulk ops, node restarts) answer **204/202 with an empty body**; `_request` normalises that into `{"status": "success", "response": None, "empty_body": True}`.
+- **Stale references self-heal**: when the panel returns a reference different from the stored one, `_get_or_create_panel_user_link_details` (and the admin sync) rewrite `users.panel_user_uuid` *and* call `subscription_dal.rebind_panel_user_reference` so reference-filtered subscription lookups keep working. This is what carries a database over a 2.x → 3.x panel upgrade — there is no Alembic migration for it.
+- **Webhook events**: 2.8.0 collapsed `user.expires_in_{72,48,24}_hours` / `user.expired_24_hours_ago` into a single `user.expiration` event with `meta.expiration` = signed hours (negative before expiry, positive after). `panel_webhook_service.py` maps both the new and legacy forms; only the ±24/48/72h buckets have message templates. Requires `EXPIRATION_NOTIFICATIONS_ENABLED=true` on the panel. `meta` is a top-level sibling of `data`, not nested inside it.
+- **"User absent" is three error codes, not one**: `A025` USER_NOT_FOUND (by-id, DELETE, actions), `A062` USERS_NOT_FOUND (collections), `A063` GET_USER_BY_UNIQUE_FIELDS_NOT_FOUND — the one `by-username`/`by-short-uuid` actually returns. Use `PanelApiService._is_absent()` (all three, plus any 404) rather than an inline allowlist; missing `A063` turns a routine "not provisioned yet" into a logged hard error. Note 5xx never reaches these checks — `_raise_if_transient` converts it to `PanelUnavailableError` first.
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+`tests/` covers the panel API contract (routes and payloads), the HTTP envelope handling, webhook event mapping, and the panel-reference relinking. Everything is stubbed — no network, no database. `tests/conftest.py` provides `RecordingPanelApiService`, which records `(method, endpoint, kwargs)` per call and replays scripted responses.
+
 ## Database Migrations
 
 When adding new model fields or tables:

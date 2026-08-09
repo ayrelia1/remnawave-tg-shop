@@ -11,7 +11,11 @@ from bot.utils.config_link import prepare_config_links
 from db.models import User, Subscription
 
 from config.settings import Settings
-from .panel_api_service import PanelApiService
+from .panel_api_service import (
+    PanelApiService,
+    extract_panel_user_ref,
+    panel_username_for_telegram_id,
+)
 
 
 class SubscriptionService:
@@ -82,7 +86,7 @@ class SubscriptionService:
             return None, None, None, False
 
         current_local_panel_uuid = db_user.panel_user_uuid
-        panel_username_on_panel_standard = f"tg_{user_id}"
+        panel_username_on_panel_standard = panel_username_for_telegram_id(user_id)
 
         panel_user_obj_from_api = None
         panel_user_created_or_linked_now = False
@@ -93,7 +97,9 @@ class SubscriptionService:
         if panel_users_by_tg_id_list and len(panel_users_by_tg_id_list) == 1:
             panel_user_obj_from_api = panel_users_by_tg_id_list[0]
             logging.info(
-                f"Found panel user by telegramId {user_id}: UUID {panel_user_obj_from_api.get('uuid')}, Username: {panel_user_obj_from_api.get('username')}"
+                f"Found panel user by telegramId {user_id}: panel id "
+                f"{extract_panel_user_ref(panel_user_obj_from_api)}, "
+                f"Username: {panel_user_obj_from_api.get('username')}"
             )
         elif panel_users_by_tg_id_list and len(panel_users_by_tg_id_list) > 1:
             logging.error(
@@ -102,12 +108,26 @@ class SubscriptionService:
             return None, None, None, False
 
         if not panel_user_obj_from_api:
+            # The panel has no user carrying this telegramId. Before creating a
+            # duplicate, try the username this bot always provisions under —
+            # this also recovers users whose telegramId was cleared on the panel.
+            fetched_by_username_list = await self.panel_service.get_users_by_filter(
+                username=panel_username_on_panel_standard
+            )
+            if fetched_by_username_list and len(fetched_by_username_list) == 1:
+                panel_user_obj_from_api = fetched_by_username_list[0]
+                logging.info(
+                    f"Found panel user by username '{panel_username_on_panel_standard}' "
+                    f"for TG user {user_id}."
+                )
+
+        if not panel_user_obj_from_api:
             if current_local_panel_uuid:
 
                 logging.info(
-                    f"User {user_id} (local panel_uuid: {current_local_panel_uuid}) not found on panel by TG ID. Fetching by panel_uuid."
+                    f"User {user_id} (local panel ref: {current_local_panel_uuid}) not found on panel by TG ID or username. Fetching by panel ref."
                 )
-                panel_user_obj_from_api = await self.panel_service.get_user_by_uuid(
+                panel_user_obj_from_api = await self.panel_service.get_user_by_ref(
                     current_local_panel_uuid
                 )
                 if not panel_user_obj_from_api:
@@ -167,7 +187,10 @@ class SubscriptionService:
                     panel_user_obj_from_api = creation_response.get("response")
                     panel_user_created_or_linked_now = True
 
-                elif creation_response and creation_response.get("errorCode") == "A019":
+                elif PanelApiService._error_code(creation_response) == "A019":
+                    # A019 = USER_USERNAME_ALREADY_EXISTS. `_request` nests the
+                    # code under "details" for non-2xx answers, so read it via
+                    # the helper rather than off the top level.
                     logging.warning(
                         f"Panel user '{panel_username_on_panel_standard}' already exists (errorCode A019). Fetching by username."
                     )
@@ -198,13 +221,13 @@ class SubscriptionService:
                 panel_user_created_or_linked_now,
             )
 
-        actual_panel_uuid_from_api = panel_user_obj_from_api.get("uuid")
+        actual_panel_uuid_from_api = extract_panel_user_ref(panel_user_obj_from_api)
         actual_panel_username_from_api = panel_user_obj_from_api.get("username")
         panel_telegram_id_from_api = panel_user_obj_from_api.get("telegramId")
 
         if not actual_panel_uuid_from_api:
             logging.error(
-                f"Panel user object for TG user {user_id} does not contain 'uuid'. Data: {panel_user_obj_from_api}"
+                f"Panel user object for TG user {user_id} carries no 'id'. Data: {panel_user_obj_from_api}"
             )
             return (
                 current_local_panel_uuid,
@@ -221,8 +244,8 @@ class SubscriptionService:
             and current_local_panel_uuid != actual_panel_uuid_from_api
         ):
             logging.warning(
-                f"Local panel_uuid for user {user_id} ('{current_local_panel_uuid}') "
-                f"differs from panel's UUID ('{actual_panel_uuid_from_api}') for their telegramId. "
+                f"Local panel reference for user {user_id} ('{current_local_panel_uuid}') "
+                f"differs from the panel's id ('{actual_panel_uuid_from_api}') for their telegramId. "
                 f"Will attempt to update local to panel's version."
             )
             needs_local_panel_uuid_update = True
@@ -247,8 +270,15 @@ class SubscriptionService:
                 }
 
                 # Do not overwrite Telegram username with panel username.
-                # Only update the local linkage to panel UUID here.
+                # Only update the local linkage to the panel reference here.
                 await user_dal.update_user(session, user_id, update_data_for_local_user)
+                # Existing subscription rows still carry the previous reference
+                # (e.g. the pre-3.0 UUID). Re-bind them so lookups filtered by
+                # panel reference keep finding the user's active subscription.
+                if current_local_panel_uuid != actual_panel_uuid_from_api:
+                    await subscription_dal.rebind_panel_user_reference(
+                        session, user_id, actual_panel_uuid_from_api
+                    )
                 db_user.panel_user_uuid = actual_panel_uuid_from_api
                 panel_user_created_or_linked_now = True
                 current_local_panel_uuid = actual_panel_uuid_from_api
@@ -449,7 +479,7 @@ class SubscriptionService:
             logging.error("Failed to ensure panel linkage for user %s during traffic activation", user_id)
             return None
 
-        panel_user_data = await self.panel_service.get_user_by_uuid(panel_user_uuid) or {}
+        panel_user_data = await self.panel_service.get_user_by_ref(panel_user_uuid) or {}
         traffic_info = panel_user_data.get("userTraffic") or {}
         current_limit = panel_user_data.get("trafficLimitBytes")
         current_used = traffic_info.get("usedTrafficBytes")
@@ -899,7 +929,7 @@ class SubscriptionService:
         local_active_sub = await subscription_dal.get_active_subscription_by_user_id(
             session, user_id, panel_user_uuid
         )
-        panel_user_data = await self.panel_service.get_user_by_uuid(panel_user_uuid)
+        panel_user_data = await self.panel_service.get_user_by_ref(panel_user_uuid)
 
         if not panel_user_data:
             logging.warning(
@@ -975,7 +1005,7 @@ class SubscriptionService:
             hwid_limit = self.settings.USER_HWID_DEVICE_LIMIT
 
         return {
-            "user_id": panel_user_data.get("uuid"),
+            "user_id": extract_panel_user_ref(panel_user_data),
             "end_date": panel_end_date,
             "status_from_panel": panel_user_data.get("status", "UNKNOWN").upper(),
             "config_link": display_link,
@@ -1147,8 +1177,9 @@ class SubscriptionService:
         hwid_device_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
-        if include_uuid and panel_user_uuid:
-            payload["uuid"] = panel_user_uuid
+        # The user identity is injected by PanelApiService.update_user_details_on_panel
+        # as the numeric `id` the 3.x PATCH /api/users body expects; panel_user_uuid /
+        # include_uuid are kept only so existing call sites stay valid.
         if expire_at is not None:
             payload["expireAt"] = expire_at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
         if status is not None:

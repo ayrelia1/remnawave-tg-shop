@@ -12,6 +12,11 @@ README.md
 .travis.yml
 .taskcluster.yml
 
+# Tests (not needed in the runtime image)
+tests/
+pytest.ini
+requirements-dev.txt
+
 # Docker
 docker-compose.yml
 Dockerfile

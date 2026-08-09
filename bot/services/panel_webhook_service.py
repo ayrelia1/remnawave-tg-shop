@@ -14,13 +14,56 @@ from bot.middlewares.i18n import JsonI18n
 from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup, get_autorenew_cancel_keyboard
 from db.dal import user_dal
 
-EVENT_MAP = {
-    "user.expires_in_72_hours": (3, "subscription_72h_notification"),
-    "user.expires_in_48_hours": (2, "subscription_48h_notification"),
-    "user.expires_in_24_hours": (1, "subscription_24h_notification"),
+# Remnawave 2.8.0 collapsed user.expires_in_{72,48,24}_hours and
+# user.expired_24_hours_ago into a single `user.expiration` event carrying
+# `meta.expiration` — signed hours relative to expiry, negative before it and
+# positive after. The legacy names are still accepted so the bot keeps working
+# against a panel that has not been upgraded yet.
+EXPIRATION_EVENT = "user.expiration"
+
+LEGACY_EXPIRATION_EVENT_HOURS = {
+    "user.expires_in_72_hours": -72,
+    "user.expires_in_48_hours": -48,
+    "user.expires_in_24_hours": -24,
+    "user.expired_24_hours_ago": 24,
+}
+
+# Message templates state the remaining time literally ("через 3 дня"), so only
+# these day buckets have a truthful template.
+DAYS_BEFORE_MESSAGE_KEYS = {
+    3: "subscription_72h_notification",
+    2: "subscription_48h_notification",
+    1: "subscription_24h_notification",
 }
 
 NODE_EVENTS = {"node.connection_lost", "node.connection_restored"}
+
+
+def expiration_hours_from_event(event_name: str, meta: Optional[dict]) -> Optional[int]:
+    """Signed hours-to-expiry for an expiration event, or None if not one.
+
+    Negative = fires before expiry ("expires in |N| hours"),
+    positive = fires after it ("expired N hours ago").
+    """
+    if event_name in LEGACY_EXPIRATION_EVENT_HOURS:
+        return LEGACY_EXPIRATION_EVENT_HOURS[event_name]
+    if event_name != EXPIRATION_EVENT:
+        return None
+    raw = (meta or {}).get("expiration")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logging.warning("Panel webhook %s carried non-numeric meta.expiration=%r", event_name, raw)
+        return None
+
+
+def expiration_bucket(hours: int) -> tuple[str, int]:
+    """Map signed hours onto ('before'|'after', whole days), days >= 1."""
+    direction = "after" if hours > 0 else "before"
+    days = max(1, round(abs(hours) / 24))
+    return direction, days
 
 class PanelWebhookService:
     def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService, notification_service: NotificationService):
@@ -47,7 +90,7 @@ class PanelWebhookService:
         except Exception as e:
             logging.error(f"Failed to send notification to {user_id}: {e}")
 
-    async def handle_event(self, event_name: str, user_payload: dict):
+    async def handle_event(self, event_name: str, user_payload: dict, meta: Optional[dict] = None):
         telegram_id = user_payload.get("telegramId")
         if not telegram_id:
             logging.warning("Panel webhook without telegramId received")
@@ -64,8 +107,39 @@ class PanelWebhookService:
 
         markup = get_subscribe_only_markup(lang, self.i18n)
 
-        if event_name in EVENT_MAP:
-            days_left, msg_key = EVENT_MAP[event_name]
+        expiration_hours = expiration_hours_from_event(event_name, meta)
+        if expiration_hours is not None:
+            direction, days = expiration_bucket(expiration_hours)
+
+            if direction == "after":
+                if days != 1:
+                    logging.info(
+                        "Panel webhook %s: no template for 'expired %s days ago' "
+                        "(meta.expiration=%s); skipping.", event_name, days, expiration_hours
+                    )
+                    return
+                if not self.settings.SUBSCRIPTION_NOTIFY_AFTER_EXPIRE:
+                    return
+                await self._send_message(
+                    user_id,
+                    lang,
+                    "subscription_expired_yesterday_notification",
+                    reply_markup=markup,
+                    user_name=first_name,
+                    end_date=user_payload.get("expireAt", "")[:10],
+                )
+                return
+
+            msg_key = DAYS_BEFORE_MESSAGE_KEYS.get(days)
+            if not msg_key:
+                logging.info(
+                    "Panel webhook %s: no template for '%s days left' (meta.expiration=%s). "
+                    "Set EXPIRATION_NOTIFICATIONS to [-72,-48,-24,24] on the panel to match "
+                    "the bot's templates; skipping.", event_name, days, expiration_hours
+                )
+                return
+
+            days_left = days
             if days_left == 1:
                 # Trigger auto-renew via SubscriptionService (wired in at factory)
                 try:
@@ -129,15 +203,6 @@ class PanelWebhookService:
                     user_name=first_name,
                     end_date=user_payload.get("expireAt", "")[:10],
                 )
-        elif event_name == "user.expired_24_hours_ago" and self.settings.SUBSCRIPTION_NOTIFY_AFTER_EXPIRE:
-            await self._send_message(
-                user_id,
-                lang,
-                "subscription_expired_yesterday_notification",
-                reply_markup=markup,
-                user_name=first_name,
-                end_date=user_payload.get("expireAt", "")[:10],
-            )
 
     async def handle_node_event(self, event_name: str, node_payload: dict):
         """Handle node status change events from the Remnawave panel."""
@@ -193,13 +258,19 @@ class PanelWebhookService:
             user_data = payload.get("payload") or payload.get("data", {})
             if isinstance(user_data, dict) and "user" in user_data:
                 user_data = user_data.get("user") or user_data
+            # `meta` sits next to `data` and carries meta.expiration (signed hours)
+            # for the user.expiration event introduced in panel 2.8.0.
+            meta = payload.get("meta")
+            if not isinstance(meta, dict):
+                meta = None
             telegram_id = user_data.get("telegramId") if isinstance(user_data, dict) else None
             logging.info(
-                "Panel webhook event received: %s; telegramId=%s",
+                "Panel webhook event received: %s; telegramId=%s; meta=%s",
                 event_name,
                 telegram_id if telegram_id is not None else "N/A",
+                meta if meta else "N/A",
             )
-            await self.handle_event(event_name, user_data)
+            await self.handle_event(event_name, user_data, meta)
 
         return web.Response(status=200, text="ok")
 

@@ -128,6 +128,34 @@ async def upsert_subscription(session: AsyncSession,
         return new_sub
 
 
+async def rebind_panel_user_reference(
+        session: AsyncSession, user_id: int, new_panel_user_ref: str) -> int:
+    """Re-point a user's subscription rows at a new panel user reference.
+
+    Remnawave 3.0 dropped `User.uuid` and identifies users by a numeric `id`,
+    so every reference stored while running a 2.x panel is stale after the
+    upgrade. Subscriptions are owned by `user_id`, so they can be re-bound
+    wholesale once the panel hands us the new reference — otherwise lookups
+    filtered by panel reference would silently miss an active subscription.
+    Returns the number of rows updated.
+    """
+    stmt = (
+        update(Subscription)
+        .where(
+            Subscription.user_id == user_id,
+            Subscription.panel_user_uuid != new_panel_user_ref,
+        )
+        .values(panel_user_uuid=new_panel_user_ref)
+    )
+    result = await session.execute(stmt)
+    rowcount = result.rowcount or 0
+    if rowcount:
+        logging.info(
+            f"Re-bound {rowcount} subscription(s) of user {user_id} to panel reference {new_panel_user_ref}."
+        )
+    return rowcount
+
+
 async def deactivate_other_active_subscriptions(
         session: AsyncSession, panel_user_uuid: str,
         current_panel_subscription_uuid: Optional[str]):

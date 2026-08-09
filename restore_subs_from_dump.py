@@ -2,7 +2,7 @@
 
 Reads PANEL_API_URL / PANEL_API_KEY from .env, parses the
 `COPY public.subscriptions ...` block in the dump, and for each row calls
-PATCH /users with {uuid, expireAt} so the panel matches the dump's end_date.
+PATCH /users with {id, expireAt} so the panel matches the dump's end_date.
 
 Users listed in SKIP_TELEGRAM_IDS are left untouched (they received
 promo/payments AFTER the backup was taken and must keep their newer state).
@@ -123,8 +123,18 @@ async def patch_user(
     sub: SubRow,
     sem: asyncio.Semaphore,
 ) -> tuple[SubRow, bool, str]:
+    # Remnawave 3.x identifies users by numeric `id` in the PATCH body; the dump
+    # may still hold pre-3.0 UUIDs, which the panel no longer knows about.
+    try:
+        panel_id = int(str(sub.panel_user_uuid).strip())
+    except (TypeError, ValueError):
+        return sub, False, (
+            f"stale pre-3.0 panel reference {sub.panel_user_uuid!r}: "
+            "re-resolve the user by username tg_<telegram_id> first"
+        )
+
     payload = {
-        "uuid": sub.panel_user_uuid,
+        "id": panel_id,
         "expireAt": iso_for_panel(effective_expire_at(sub.end_date)),
     }
     headers = {
