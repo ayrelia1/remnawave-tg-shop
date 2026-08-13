@@ -58,15 +58,6 @@ class PlategaService:
         if not self.configured:
             logging.warning("PlategaService initialized but not fully configured. Payments disabled.")
 
-    def _amount_with_client_commission(self, amount: Decimal) -> Decimal:
-        """Order price increased by the commission Platega charges to the client."""
-        percent = Decimal(str(getattr(self.settings, "PLATEGA_CLIENT_COMMISSION_PERCENT", 0) or 0))
-        if percent <= 0:
-            return amount
-        return (amount * (Decimal("1") + percent / Decimal("100"))).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-
     async def _get_session(self) -> ClientSession:
         if self._session is None or self._session.closed:
             self._session = ClientSession(timeout=self._timeout)
@@ -246,22 +237,20 @@ class PlategaService:
                     try:
                         incoming_amount = Decimal(str(amount_raw)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         expected_amount = Decimal(str(payment.amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        expected_with_commission = self._amount_with_client_commission(expected_amount)
-                        # The client-side commission is added by Platega on top of the order price,
-                        # so the webhook reports more than the tariff costs (129 -> 136.10 at 5.5%).
-                        # Tolerance covers rounding differences on the provider side; without a
-                        # configured commission the comparison stays strict.
-                        has_commission = expected_with_commission != expected_amount
-                        tolerance = Decimal("0.01") if has_commission else Decimal("0")
-                        if not (expected_amount - tolerance <= incoming_amount <= expected_with_commission + tolerance):
+                        # Platega adds the client-side commission on top of the order price and
+                        # rounds it its own way (129 -> 136.10, sometimes -> 137), so any overpayment
+                        # is legitimate and must not block activation. Only an underpayment is a
+                        # real problem — relevant for payment methods where the payer chooses the
+                        # amount (crypto), not for SBP QR where it is baked into the code.
+                        if incoming_amount < expected_amount - Decimal("0.01"):
                             logging.error(
-                                "Platega webhook: amount mismatch for payment %s (expected %s, got %s)",
+                                "Platega webhook: underpayment for payment %s (expected at least %s, got %s)",
                                 payment.payment_id,
-                                f"{expected_amount}..{expected_with_commission}" if has_commission else expected_amount,
+                                expected_amount,
                                 incoming_amount,
                             )
                             return web.Response(status=400, text="amount_mismatch")
-                        if incoming_amount > expected_amount + tolerance:
+                        if incoming_amount > expected_amount:
                             logging.info(
                                 "Platega webhook: payment %s paid with client commission (order %s, paid %s)",
                                 payment.payment_id,
@@ -269,8 +258,10 @@ class PlategaService:
                                 incoming_amount,
                             )
                     except Exception as exc:
+                        # The amount is not the decisive criterion — the transaction id lookup and
+                        # the header auth already identify the payment. Log and continue instead of
+                        # dropping a payment the customer has already made.
                         logging.error("Platega webhook: failed to compare amounts for %s: %s", payment.payment_id, exc)
-                        return web.Response(status=400, text="amount_validation_error")
 
                 try:
                     marked = await payment_dal.mark_provider_payment_succeeded_once(

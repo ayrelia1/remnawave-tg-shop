@@ -116,9 +116,9 @@ class Settings(BaseSettings):
     PLATEGA_CLIENT_COMMISSION_PERCENT: float = Field(
         default=0.0,
         description=(
-            "Platega commission in percent paid by the client on top of the order price "
-            "(must match the merchant cabinet setting). Used to accept webhooks whose "
-            "amount is higher than the tariff price, e.g. 129 RUB -> 136.10 RUB at 5.5%."
+            "DEPRECATED, no longer used. The webhook now accepts any overpayment, so the "
+            "client-side commission no longer has to be kept in sync with the Platega "
+            "cabinet. Kept so existing .env files keep parsing."
         ),
     )
 
