@@ -105,7 +105,7 @@ async def request_trial_confirmation_handler(
             "trial_activated_details_message",
             days=activation_result.get("days", settings.TRIAL_DURATION_DAYS),
             end_date=(
-                end_date_obj.strftime("%Y-%m-%d")
+                end_date_obj.strftime("%d.%m.%Y")
                 if isinstance(end_date_obj, datetime)
                 else "N/A"
             ),
@@ -246,7 +246,7 @@ async def confirm_activate_trial_handler(
             "trial_activated_details_message",
             days=activation_result.get("days", settings.TRIAL_DURATION_DAYS),
             end_date=(
-                end_date_obj.strftime("%Y-%m-%d")
+                end_date_obj.strftime("%d.%m.%Y")
                 if isinstance(end_date_obj, datetime)
                 else "N/A"
             ),

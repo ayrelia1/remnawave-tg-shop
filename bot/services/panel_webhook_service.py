@@ -5,6 +5,7 @@ import hashlib
 from aiohttp import web
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
+from aiogram.utils.text_decorations import html_decoration as hd
 from sqlalchemy.orm import sessionmaker
 from typing import Optional
 from config.settings import Settings
@@ -103,7 +104,8 @@ class PanelWebhookService:
         async with self.async_session_factory() as session:
             db_user = await user_dal.get_user_by_id(session, user_id)
             lang = db_user.language_code if db_user and db_user.language_code else self.settings.DEFAULT_LANGUAGE
-            first_name = db_user.first_name or f"User {user_id}" if db_user else f"User {user_id}"
+            first_name = hd.quote(
+                db_user.first_name or f"User {user_id}" if db_user else f"User {user_id}")
 
         markup = get_subscribe_only_markup(lang, self.i18n)
 

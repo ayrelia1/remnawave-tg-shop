@@ -420,7 +420,7 @@ class FreeKassaService:
                 final_end = activation["end_date"]
 
             if final_end:
-                end_date_str = final_end.strftime("%Y-%m-%d")
+                end_date_str = final_end.strftime("%d.%m.%Y")
             else:
                 end_date_str = _("config_link_not_available")
             days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
@@ -446,7 +446,7 @@ class FreeKassaService:
                     "payment_successful_with_referral_bonus_full",
                     months=months,
                     days=days_total,
-                    base_end_date=activation["end_date"].strftime("%Y-%m-%d") if activation and activation.get("end_date") else end_date_str,
+                    base_end_date=activation["end_date"].strftime("%d.%m.%Y") if activation and activation.get("end_date") else end_date_str,
                     bonus_days=applied_days,
                     final_end_date=end_date_str,
                     inviter_name=inviter_name_display,
@@ -464,7 +464,7 @@ class FreeKassaService:
                 order_info_text = _(
                     "free_kassa_order_full",
                     order_id=provider_payment_id,
-                    date=datetime.now().strftime("%Y-%m-%d"),
+                    date=datetime.now().strftime("%d.%m.%Y"),
                 )
                 text = f"{order_info_text}\n{text}"
 

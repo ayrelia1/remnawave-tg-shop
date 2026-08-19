@@ -331,7 +331,7 @@ class PlategaService:
                     text = _(
                         "payment_successful_traffic_full",
                         traffic_gb=traffic_label,
-                        end_date=final_end.strftime("%Y-%m-%d") if final_end else "",
+                        end_date=final_end.strftime("%d.%m.%Y") if final_end else "",
                         config_link=config_link_text,
                     )
                 elif applied_days:
@@ -349,9 +349,9 @@ class PlategaService:
                         "payment_successful_with_referral_bonus_full",
                         months=payment_months,
                         days=days_total,
-                        base_end_date=activation["end_date"].strftime("%Y-%m-%d") if activation and activation.get("end_date") else final_end.strftime("%Y-%m-%d") if final_end else "",
+                        base_end_date=activation["end_date"].strftime("%d.%m.%Y") if activation and activation.get("end_date") else final_end.strftime("%d.%m.%Y") if final_end else "",
                         bonus_days=applied_days,
-                        final_end_date=final_end.strftime("%Y-%m-%d") if final_end else "",
+                        final_end_date=final_end.strftime("%d.%m.%Y") if final_end else "",
                         inviter_name=inviter_name_display,
                         config_link=config_link_text,
                     )
@@ -361,7 +361,7 @@ class PlategaService:
                         months=payment_months,
                         days=days_total,
                         bonus_days=applied_promo_days,
-                        end_date=final_end.strftime("%Y-%m-%d"),
+                        end_date=final_end.strftime("%d.%m.%Y"),
                         config_link=config_link_text,
                     )
                 else:
@@ -369,7 +369,7 @@ class PlategaService:
                         "payment_successful_full",
                         months=payment_months,
                         days=days_total,
-                        end_date=final_end.strftime("%Y-%m-%d") if final_end else "",
+                        end_date=final_end.strftime("%d.%m.%Y") if final_end else "",
                         config_link=config_link_text,
                     )
 

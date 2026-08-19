@@ -131,6 +131,11 @@ async def send_main_menu(target_event: Union[types.Message,
                 use_mini_app = True
             else:
                 connect_url = active.get("connect_button_url") or active.get("config_link")
+        elif show_trial_button_in_menu:
+            text = text + "\n\n" + _(key="main_menu_trial_available",
+                                     days=settings.TRIAL_DURATION_DAYS)
+        else:
+            text = text + "\n\n" + _(key="main_menu_no_subscription")
     except PanelUnavailableError as exc:
         logging.warning("Panel unavailable while enriching main menu (user %s): %s", user_id, exc)
         panel_unavailable = True
@@ -578,7 +583,7 @@ async def start_command_handler(message: types.Message,
 
                 promo_success_text = _(
                     "promo_code_applied_success_full",
-                    end_date=(new_end_date.strftime("%d.%m.%Y %H:%M:%S") if new_end_date else "N/A"),
+                    end_date=(new_end_date.strftime("%d.%m.%Y") if new_end_date else "N/A"),
                     config_link=config_link_text,
                 )
 

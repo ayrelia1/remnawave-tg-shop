@@ -7,16 +7,22 @@ from aiogram import BaseMiddleware
 from aiogram.types import User, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.constants.premium_emoji import render_text_emoji
 from db.dal import user_dal
 from config.settings import Settings
 
 
 class JsonI18n:
 
-    def __init__(self, path: str, default: str = "en", domain: str = "bot"):
+    def __init__(self,
+                 path: str,
+                 default: str = "en",
+                 domain: str = "bot",
+                 premium_emoji: bool = True):
         self.domain = domain
         self.path = path
         self.default_lang = default
+        self.premium_emoji = premium_emoji
         self.locales_data: Dict[str, Dict[str, str]] = {}
         self._load_locales()
         logging.info(
@@ -34,7 +40,8 @@ class JsonI18n:
                 file_path = os.path.join(self.path, item)
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
-                        self.locales_data[lang_code] = json.load(f)
+                        self.locales_data[lang_code] = self._expand_emoji(
+                            json.load(f))
                 except json.JSONDecodeError as e_json_load:
                     logging.error(
                         f"Error loading locale {lang_code} from {file_path} (JSON Decode Error): {e_json_load}"
@@ -43,6 +50,14 @@ class JsonI18n:
                     logging.error(
                         f"Error loading locale {lang_code} from {file_path}: {e_load}",
                         exc_info=True)
+
+    def _expand_emoji(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Turn ``::name::`` tokens in locale strings into <tg-emoji> tags."""
+        return {
+            key: render_text_emoji(value, self.premium_emoji)
+            if isinstance(value, str) else value
+            for key, value in data.items()
+        }
 
     def gettext(self, lang_code: Optional[str], key: str, **kwargs) -> str:
         # Determine effective language with robust fallback
@@ -102,7 +117,8 @@ _i18n_instance_singleton: Optional[JsonI18n] = None
 
 def get_i18n_instance(path: str = "locales",
                       default: str = "en",
-                      domain: str = "bot") -> JsonI18n:
+                      domain: str = "bot",
+                      premium_emoji: bool = True) -> JsonI18n:
     global _i18n_instance_singleton
     if _i18n_instance_singleton is None:
 
@@ -113,11 +129,13 @@ def get_i18n_instance(path: str = "locales",
 
             _i18n_instance_singleton = JsonI18n(path=path,
                                                 default=default,
-                                                domain=domain)
+                                                domain=domain,
+                                                premium_emoji=premium_emoji)
         else:
             _i18n_instance_singleton = JsonI18n(path=path,
                                                 default=default,
-                                                domain=domain)
+                                                domain=domain,
+                                                premium_emoji=premium_emoji)
     return _i18n_instance_singleton
 
 

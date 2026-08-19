@@ -509,7 +509,7 @@ async def my_subscription_command_handler(
         text = get_text(
             "my_traffic_details",
             status=_localize_status(active.get("status_from_panel"), get_text),
-            end_date=end_date.strftime("%Y-%m-%d") if end_date else get_text("traffic_no_expiry"),
+            end_date=end_date.strftime("%d.%m.%Y") if end_date else get_text("traffic_no_expiry"),
             traffic_limit=limit_display,
             traffic_used=used_display,
             traffic_left=remaining_display,
@@ -526,7 +526,7 @@ async def my_subscription_command_handler(
                 max_devices_display = str(max_devices_val)
         text = get_text(
             "my_subscription_details",
-            end_date=end_date.strftime("%Y-%m-%d") if end_date else "N/A",
+            end_date=end_date.strftime("%d.%m.%Y") if end_date else "N/A",
             days_left=max(0, days_left),
             status=_localize_status(active.get("status_from_panel"), get_text),
             config_link=config_link_value,

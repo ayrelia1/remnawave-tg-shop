@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = Field(default="vpn_shop_db")
 
     DEFAULT_LANGUAGE: str = Field(default="ru")
+    PREMIUM_EMOJI_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Render ::token:: placeholders in locale strings as Telegram custom "
+            "(premium) emoji. Requires a bot with a Fragment username; set to "
+            "false to fall back to plain unicode glyphs."
+        ),
+    )
 
     SUPPORT_LINK: Optional[str] = Field(default=None)
     SERVER_STATUS_URL: Optional[str] = Field(default=None)

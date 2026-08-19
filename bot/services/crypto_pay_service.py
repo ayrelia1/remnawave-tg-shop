@@ -323,7 +323,7 @@ class CryptoPayService:
             if sale_mode == "traffic":
                 text = _("payment_successful_traffic_full",
                          traffic_gb=str(int(traffic_gb)) if float(traffic_gb).is_integer() else f"{traffic_gb:g}",
-                         end_date=final_end.strftime('%Y-%m-%d') if final_end else "—",
+                         end_date=final_end.strftime('%d.%m.%Y') if final_end else "—",
                          config_link=config_link_text)
             elif applied_days:
                 inviter_name_display = _("friend_placeholder")
@@ -338,16 +338,16 @@ class CryptoPayService:
                 text = _("payment_successful_with_referral_bonus_full",
                          months=int(months),
                          days=days_total,
-                         base_end_date=activation["end_date"].strftime('%Y-%m-%d'),
+                         base_end_date=activation["end_date"].strftime('%d.%m.%Y'),
                          bonus_days=applied_days,
-                         final_end_date=final_end.strftime('%Y-%m-%d'),
+                         final_end_date=final_end.strftime('%d.%m.%Y'),
                          inviter_name=inviter_name_display,
                          config_link=config_link_text)
             else:
                 text = _("payment_successful_full",
                          months=int(months),
                          days=days_total,
-                         end_date=final_end.strftime('%Y-%m-%d') if final_end else "—",
+                         end_date=final_end.strftime('%d.%m.%Y') if final_end else "—",
                          config_link=config_link_text)
 
             markup = get_connect_and_main_keyboard(

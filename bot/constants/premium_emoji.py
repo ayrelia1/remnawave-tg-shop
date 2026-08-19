@@ -54,6 +54,10 @@ Note: Some glyphs appear multiple times in the pack with different ids; the
 semantic constants below pick one id per role used in this bot.
 """
 
+import logging
+import re
+from typing import Dict, Tuple
+
 # Navigation
 PREMIUM_EMOJI_BACK = "5258236805890710909"
 PREMIUM_EMOJI_NEXT = "5258215850745275216"
@@ -111,3 +115,82 @@ PREMIUM_EMOJI_HAND_STOP = "5258362429389152256"
 # Language / channel gate
 PREMIUM_EMOJI_BOOK = "5258328383183396223"
 PREMIUM_EMOJI_EYES = "5260341314095947411"
+
+
+# ---------------------------------------------------------------------------
+# Inline custom emoji for message bodies (<tg-emoji> HTML tag)
+# ---------------------------------------------------------------------------
+# Locale strings reference an entry by name with a ``::name::`` token, e.g.
+# ``"::bolt:: Привет"`` renders as
+# ``'<tg-emoji emoji-id="5258152182150077732">⚡️</tg-emoji> Привет'``.
+#
+# Tokens are resolved once, when the locale files are loaded (see
+# bot/middlewares/i18n.py), so handlers keep calling ``i18n.gettext()`` as
+# before. Use tokens only in strings rendered with parse_mode=HTML — button
+# labels and callback alerts are plain text and must stay on bare unicode.
+
+TEXT_EMOJI: Dict[str, Tuple[str, str]] = {
+    # brand / status
+    "bolt": (PREMIUM_EMOJI_SUBSCRIBE, "⚡️"),
+    "lock": (PREMIUM_EMOJI_SUBSCRIPTION, "🔒"),
+    "moon": ("5258011861273551368", "🌘"),
+    "sparkle": ("5258212268742549391", "🌠"),
+    "star": (PREMIUM_EMOJI_STAR, "⭐️"),
+    # time
+    "calendar": ("5258105663359294787", "🗓"),
+    "clock": (PREMIUM_EMOJI_TIMER, "⏲️"),
+    "infinity": (PREMIUM_EMOJI_INFINITY, "♾️"),
+    # money
+    "money": (PREMIUM_EMOJI_PAY, "💰"),
+    "coin": (PREMIUM_EMOJI_COIN, "🪙"),
+    "diamond": (PREMIUM_EMOJI_CRYPTO, "💎"),
+    "tag": (PREMIUM_EMOJI_TAG, "🏷"),
+    # outcome
+    "check": ("5258057130228849960", "✅"),
+    "cross": ("5258071638628377037", "❌"),
+    "warn": ("5258474669769497337", "❗️"),
+    "stop": (PREMIUM_EMOJI_BAN, "⛔️"),
+    # objects
+    "laptop": (PREMIUM_EMOJI_COMPUTER, "💻"),
+    "chain": (PREMIUM_EMOJI_CONNECT, "⛓️"),
+    "doc": (PREMIUM_EMOJI_DOCUMENT, "📄"),
+    "chart": (PREMIUM_EMOJI_STATS, "📈"),
+    "info": (PREMIUM_EMOJI_INFO, "ℹ️"),
+    "bulb": ("5258216851472654189", "💡"),
+    "settings": (PREMIUM_EMOJI_SETTINGS, "⚙️"),
+    "book": (PREMIUM_EMOJI_BOOK, "📚"),
+    "trash": (PREMIUM_EMOJI_DELETE, "🗑"),
+    "refresh": (PREMIUM_EMOJI_REFRESH, "🔄"),
+    "swap": ("5260233433107407649", "↔️"),
+    "numbers": (PREMIUM_EMOJI_NUMBERS, "🔢"),
+    # people / social
+    "user": (PREMIUM_EMOJI_USER, "👤"),
+    "people": (PREMIUM_EMOJI_REFERRAL, "👥"),
+    "chat": (PREMIUM_EMOJI_SUPPORT, "💬"),
+    "megaphone": (PREMIUM_EMOJI_MEGAPHONE, "📣"),
+    "eyes": (PREMIUM_EMOJI_EYES, "👀"),
+    "clap": ("5258501105293205250", "👏"),
+    "plane": ("5258073068852485953", "✈️"),
+}
+
+TEXT_EMOJI_TOKEN_RE = re.compile(r"::([a-z0-9_]+)::")
+
+
+def render_text_emoji(text: str, enabled: bool = True) -> str:
+    """Expand ``::name::`` tokens into <tg-emoji> tags (or bare glyphs).
+
+    Unknown tokens are left untouched so a typo is visible instead of silently
+    swallowing part of the string.
+    """
+
+    def _replace(match: "re.Match[str]") -> str:
+        entry = TEXT_EMOJI.get(match.group(1))
+        if entry is None:
+            logging.warning("Unknown premium emoji token '%s' in locale string.", match.group(0))
+            return match.group(0)
+        emoji_id, glyph = entry
+        if not enabled:
+            return glyph
+        return f'<tg-emoji emoji-id="{emoji_id}">{glyph}</tg-emoji>'
+
+    return TEXT_EMOJI_TOKEN_RE.sub(_replace, text)

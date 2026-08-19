@@ -55,7 +55,10 @@ async def run_scheduler():
     )
 
     init_queue_manager(bot)
-    i18n = get_i18n_instance(default=settings.DEFAULT_LANGUAGE)
+    i18n = get_i18n_instance(
+        default=settings.DEFAULT_LANGUAGE,
+        premium_emoji=settings.PREMIUM_EMOJI_ENABLED,
+    )
     notification_service = NotificationService(bot, settings, i18n)
     panel_service = PanelApiService(settings)
 

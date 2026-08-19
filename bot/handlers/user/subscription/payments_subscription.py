@@ -301,7 +301,7 @@ async def select_subscription_period_callback_handler(
                 new_devices=int(devices),
                 remaining_days=preview.get("remaining_days"),
                 total_days=preview.get("total_days"),
-                end_date=preview["projected_end_date"].strftime("%Y-%m-%d"),
+                end_date=preview["projected_end_date"].strftime("%d.%m.%Y"),
                 price=_format_units(price) if price is not None else "-",
                 currency_symbol="RUB",
             )

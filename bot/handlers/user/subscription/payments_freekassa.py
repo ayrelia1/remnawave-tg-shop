@@ -195,7 +195,7 @@ async def pay_fk_callback_handler(
             order_info_text = get_text(
                 "free_kassa_order_info",
                 order_id=order_identifier_display,
-                date=datetime.now().strftime("%Y-%m-%d"),
+                date=datetime.now().strftime("%d.%m.%Y"),
             )
             try:
                 await safe_edit_text(callback.message, 

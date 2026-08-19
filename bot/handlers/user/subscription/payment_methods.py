@@ -247,7 +247,7 @@ async def payment_method_view(callback: types.CallbackQuery, settings: Settings,
             return _("payment_method_generic_title", network=network_name)
 
         title = _format_pm_title(sel.card_network, sel.card_last4)
-        added_at = sel.created_at.strftime('%Y-%m-%d') if getattr(sel, 'created_at', None) else "—"
+        added_at = sel.created_at.strftime('%d.%m.%Y') if getattr(sel, 'created_at', None) else "—"
         last_tx = "—"
         try:
             stmt = (
@@ -263,7 +263,7 @@ async def payment_method_view(callback: types.CallbackQuery, settings: Settings,
             result = await session.execute(stmt)
             lp = result.scalar_one_or_none()
             if lp and lp.created_at:
-                last_tx = lp.created_at.strftime('%Y-%m-%d')
+                last_tx = lp.created_at.strftime('%d.%m.%Y')
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payment_methods.py: %s", exc)
         details = f"{title}\n{_('payment_method_added_at', date=added_at)}\n{_('payment_method_last_tx', date=last_tx)}"
@@ -274,7 +274,7 @@ async def payment_method_view(callback: types.CallbackQuery, settings: Settings,
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payment_methods.py: %s", exc)
         return
 
-    added_at = billing.created_at.strftime('%Y-%m-%d') if getattr(billing, 'created_at', None) else "—"
+    added_at = billing.created_at.strftime('%d.%m.%Y') if getattr(billing, 'created_at', None) else "—"
     last_tx = "—"
     try:
         stmt = (
@@ -290,7 +290,7 @@ async def payment_method_view(callback: types.CallbackQuery, settings: Settings,
         result = await session.execute(stmt)
         last_payment = result.scalar_one_or_none()
         if last_payment and last_payment.created_at:
-            last_tx = last_payment.created_at.strftime('%Y-%m-%d')
+            last_tx = last_payment.created_at.strftime('%d.%m.%Y')
     except Exception as exc:
         logging.debug("Suppressed exception in bot/handlers/user/subscription/payment_methods.py: %s", exc)
 
@@ -401,7 +401,7 @@ async def payment_method_history(callback: types.CallbackQuery, settings: Settin
             title = p.description or _("traffic_purchase_title", traffic_gb=units_display)
         else:
             title = p.description or _("subscription_purchase_title", months=p.subscription_duration_months or 1)
-        date_str = p.created_at.strftime('%Y-%m-%d') if p.created_at else "N/A"
+        date_str = p.created_at.strftime('%d.%m.%Y') if p.created_at else "N/A"
         return f"{date_str} — {title} — {p.amount:.2f} {p.currency}"
 
     lines = [_format_item(p) for p in user_payments]
