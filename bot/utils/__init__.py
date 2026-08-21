@@ -33,58 +33,38 @@ def filter_kwargs(content_type: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in kwargs.items() if k in supported}
 
 
-def _utf16_len(text: str) -> int:
-    """Length in UTF-16 code units - the unit Telegram entity offsets use."""
-    return len(text.encode("utf-16-le")) // 2
+# aiogram renders custom emoji as `<tg-emoji emoji_id="...">`, but Telegram's
+# HTML parser only accepts the hyphenated `emoji-id` attribute - the same form
+# bot/constants/premium_emoji.py already emits for the locale strings. Left as
+# aiogram writes it, the tag is rejected and the premium emoji is lost.
+_AIOGRAM_EMOJI_ATTR = '<tg-emoji emoji_id="'
+_TELEGRAM_EMOJI_ATTR = '<tg-emoji emoji-id="'
 
 
-def realign_entities_after_strip(raw_text: str, stripped_text: str, entities):
-    """Re-anchor entity offsets after get_message_content() trimmed the text.
+def _normalize_custom_emoji_tags(html: str) -> str:
+    return html.replace(_AIOGRAM_EMOJI_ATTR, _TELEGRAM_EMOJI_ATTR)
 
-    Entity offsets are UTF-16 code units counted against the *original* text,
-    so trimming leading whitespace shifts every one of them left. Sending the
-    untouched offsets makes Telegram paint the formatting onto the wrong
-    characters or reject the message outright.
 
-    Formatting entities that overhang the trimmed text are clamped; a
-    custom_emoji is dropped instead, because its length has to match the
-    placeholder emoji exactly and a clamped one is invalid.
+def render_message_html(message: types.Message) -> str:
+    """Render a message's own formatting as HTML tags.
+
+    The bot is constructed with `DefaultBotProperties(parse_mode=HTML)`, so
+    every outgoing send carries `parse_mode` whether or not the caller passes
+    it - and Telegram ignores the `entities` argument whenever `parse_mode` is
+    present. Forwarding an admin's entities therefore never worked: premium
+    (custom) emoji arrived as their plain fallback glyph.
+
+    Re-emitting those entities as tags (`<b>`, `<tg-emoji emoji-id="...">`, ...)
+    is the representation that survives, and it is the very mechanism the
+    locale strings already use for premium emoji.
+
+    A message carrying no entities of its own is passed through untouched, so
+    an admin can still hand-write raw HTML in the broadcast text.
     """
+    entities = message.entities or message.caption_entities or []
     if not entities:
-        return []
-    if raw_text == stripped_text:
-        return list(entities)
-
-    shift = _utf16_len(raw_text[: len(raw_text) - len(raw_text.lstrip())])
-    limit = _utf16_len(stripped_text)
-
-    realigned = []
-    for entity in entities:
-        start = entity.offset - shift
-        end = start + entity.length
-        if start < 0 or end > limit:
-            if entity.type == "custom_emoji":
-                continue
-            start, end = max(0, start), min(limit, end)
-            if end <= start:
-                continue
-        realigned.append(entity.model_copy(update={"offset": start, "length": end - start}))
-    return realigned
-
-
-def formatting_kwargs(content_type: str, entities) -> Dict[str, Any]:
-    """Pick between forwarding entities and asking Telegram to parse HTML.
-
-    The two are mutually exclusive: when a request carries both `parse_mode`
-    and `entities`, Telegram honours `parse_mode` and silently drops the
-    entities - which is how premium (custom) emoji degrade to plain glyphs.
-    So entities win whenever the admin's message has any, and HTML parsing is
-    offered only for a message that carries no formatting of its own.
-    """
-    if entities:
-        key = "entities" if content_type == "text" else "caption_entities"
-        return {key: list(entities)}
-    return {"parse_mode": "HTML"}
+        return (message.text or message.caption or "").strip()
+    return _normalize_custom_emoji_tags(message.html_text).strip()
 
 
 def get_message_content(message: types.Message) -> MessageContent:

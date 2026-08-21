@@ -1,124 +1,139 @@
-"""Broadcast text formatting: entities vs parse_mode, and offset realignment.
+"""Broadcast formatting: the admin's own formatting must survive the resend.
 
-Two bugs are pinned here, both of which silently degraded premium (custom)
-emoji to plain glyphs:
+Premium (custom) emoji kept arriving as their plain fallback glyph. Two causes,
+both pinned here:
 
-1. The send carried `parse_mode="HTML"` *and* `entities`. Telegram honours
-   `parse_mode` when both are present and drops the entities, so the admin's
-   custom emoji never survived the trip.
-2. `get_message_content()` strips the text while entity offsets stay anchored
-   to the untrimmed original, so a message starting with a blank line shifted
-   every entity onto the wrong characters.
+1. The send forwarded the admin's `entities`. That can never work in this bot:
+   it builds `Bot` with `DefaultBotProperties(parse_mode=HTML)`, so every
+   request carries `parse_mode` even when the caller omits it, and Telegram
+   drops `entities` whenever `parse_mode` is present. The formatting has to
+   travel as HTML tags instead.
+2. aiogram renders custom emoji as `<tg-emoji emoji_id="...">`, but Telegram's
+   HTML parser only accepts the hyphenated `emoji-id` — the form
+   `bot/constants/premium_emoji.py` already emits for the locale strings.
 """
 
-from aiogram.types import MessageEntity
+from aiogram.types import Chat, Message, MessageEntity, PhotoSize, Sticker, User
 
-from bot.utils import formatting_kwargs, realign_entities_after_strip
+from bot.constants.premium_emoji import TEXT_EMOJI
+from bot.utils import render_message_html
 
 
-def _custom_emoji(offset, length=2, emoji_id="5368324170671202286"):
+CHAT = Chat(id=1, type="private")
+SENDER = User(id=1, is_bot=False, first_name="admin")
+EMOJI_ID = "5368324170671202286"
+
+
+def _message(**kwargs) -> Message:
+    return Message(message_id=1, date=0, chat=CHAT, from_user=SENDER, **kwargs)
+
+
+def _custom_emoji(offset=0, length=2, emoji_id=EMOJI_ID):
     return MessageEntity(
         type="custom_emoji", offset=offset, length=length, custom_emoji_id=emoji_id
     )
 
 
-# ------------------------------------------------- entities vs parse_mode
+def test_custom_emoji_uses_the_hyphenated_attribute():
+    """`emoji_id` (aiogram's spelling) is rejected by Telegram's parser."""
+    message = _message(text="👍 Привет", entities=[_custom_emoji()])
+
+    rendered = render_message_html(message)
+
+    assert rendered.startswith(f'<tg-emoji emoji-id="{EMOJI_ID}">')
+    assert "emoji_id=" not in rendered
 
 
-def test_entities_are_sent_without_parse_mode():
-    """Passing both makes Telegram ignore the entities."""
-    entities = [_custom_emoji(0)]
+def test_rendered_tag_matches_what_the_locale_strings_emit():
+    """The /start menu already sends premium emoji this exact way."""
+    emoji_id, glyph = TEXT_EMOJI["bolt"]
+    message = _message(
+        text=f"{glyph} тест",
+        entities=[_custom_emoji(offset=0, length=len(glyph), emoji_id=emoji_id)],
+    )
 
-    kwargs = formatting_kwargs("text", entities)
-
-    assert kwargs == {"entities": entities}
-    assert "parse_mode" not in kwargs
-
-
-def test_media_captions_use_caption_entities():
-    entities = [_custom_emoji(0)]
-
-    kwargs = formatting_kwargs("photo", entities)
-
-    assert kwargs == {"caption_entities": entities}
+    assert render_message_html(message).startswith(
+        f'<tg-emoji emoji-id="{emoji_id}">{glyph}</tg-emoji>'
+    )
 
 
-def test_plain_message_still_gets_html_parsing():
-    """An admin who types raw <b>...</b> must keep working."""
-    assert formatting_kwargs("text", []) == {"parse_mode": "HTML"}
-    assert formatting_kwargs("photo", None) == {"parse_mode": "HTML"}
+def test_custom_emoji_and_bold_travel_together():
+    message = _message(
+        text="👍 Скидка для вернувшихся",
+        entities=[_custom_emoji(), MessageEntity(type="bold", offset=3, length=6)],
+    )
+
+    assert render_message_html(message) == (
+        f'<tg-emoji emoji-id="{EMOJI_ID}">👍</tg-emoji> <b>Скидка</b> для вернувшихся'
+    )
 
 
-# ------------------------------------------------------ offset realignment
+def test_photo_caption_entities_are_rendered_too():
+    message = _message(
+        photo=[PhotoSize(file_id="F", file_unique_id="U", width=1, height=1)],
+        caption="👍 Акция",
+        caption_entities=[_custom_emoji()],
+    )
+
+    assert render_message_html(message) == (
+        f'<tg-emoji emoji-id="{EMOJI_ID}">👍</tg-emoji> Акция'
+    )
 
 
-def test_untouched_text_leaves_entities_alone():
-    entities = [_custom_emoji(0), MessageEntity(type="bold", offset=3, length=6)]
+def test_other_formatting_survives():
+    message = _message(
+        text="секрет ссылка code",
+        entities=[
+            MessageEntity(type="spoiler", offset=0, length=6),
+            MessageEntity(type="text_link", offset=7, length=6, url="https://ex.com"),
+            MessageEntity(type="code", offset=14, length=4),
+        ],
+    )
 
-    assert realign_entities_after_strip("👍 Привет", "👍 Привет", entities) == entities
-
-
-def test_leading_whitespace_shifts_every_offset():
-    raw = "\n\n👍 Привет"
-    stripped = "👍 Привет"
-    entities = [_custom_emoji(2), MessageEntity(type="bold", offset=5, length=6)]
-
-    realigned = realign_entities_after_strip(raw, stripped, entities)
-
-    assert [(e.type, e.offset, e.length) for e in realigned] == [
-        ("custom_emoji", 0, 2),
-        ("bold", 3, 6),
-    ]
+    assert render_message_html(message) == (
+        '<tg-spoiler>секрет</tg-spoiler> <a href="https://ex.com">ссылка</a> <code>code</code>'
+    )
 
 
-def test_shift_counts_utf16_units_not_python_characters():
-    """A leading emoji is two UTF-16 units, which is what offsets are in."""
-    raw = " 👍 хвост"
-    stripped = "👍 хвост"
-    # "хвост" sits at UTF-16 offset 4 in raw: space(1) + emoji(2) + space(1)
-    entities = [MessageEntity(type="bold", offset=4, length=5)]
+def test_leading_blank_lines_do_not_shift_anything():
+    """The old entity path mis-anchored offsets after the text was stripped."""
+    message = _message(text="\n\n👍 Привет", entities=[_custom_emoji(offset=2)])
 
-    realigned = realign_entities_after_strip(raw, stripped, entities)
-
-    assert (realigned[0].offset, realigned[0].length) == (3, 5)
-    start = realigned[0].offset
-    assert stripped.encode("utf-16-le")[start * 2 : (start + 5) * 2].decode("utf-16-le") == "хвост"
+    assert render_message_html(message) == (
+        f'<tg-emoji emoji-id="{EMOJI_ID}">👍</tg-emoji> Привет'
+    )
 
 
-def test_custom_emoji_that_no_longer_fits_is_dropped_not_clamped():
-    """Its length must match the placeholder exactly; a clipped one is invalid."""
-    raw = "текст 👍  "
-    stripped = "текст 👍"
-    entities = [_custom_emoji(6), MessageEntity(type="bold", offset=0, length=5)]
+def test_literal_angle_brackets_are_escaped_when_entities_exist():
+    message = _message(
+        text="цена < 100 руб", entities=[MessageEntity(type="bold", offset=0, length=5)]
+    )
 
-    realigned = realign_entities_after_strip(raw, stripped, entities)
-
-    # The custom emoji still fits here, so both survive.
-    assert len(realigned) == 2
-
-    # Now make it overhang the trimmed end.
-    overhanging = [_custom_emoji(7, length=3)]
-    assert realign_entities_after_strip(raw, stripped, overhanging) == []
+    assert render_message_html(message) == "<b>цена </b>&lt; 100 руб"
 
 
-def test_formatting_entity_overhanging_the_trim_is_clamped():
-    raw = "жирный текст\n\n"
-    stripped = "жирный текст"
-    entities = [MessageEntity(type="bold", offset=0, length=14)]
+def test_message_without_entities_is_passed_through():
+    """An admin hand-writing raw HTML must keep working."""
+    message = _message(text="<b>жирный</b> руками")
 
-    realigned = realign_entities_after_strip(raw, stripped, entities)
-
-    assert (realigned[0].offset, realigned[0].length) == (0, 12)
+    assert render_message_html(message) == "<b>жирный</b> руками"
 
 
-def test_entity_falling_entirely_outside_is_dropped():
-    raw = "текст\n\n"
-    stripped = "текст"
-    entities = [MessageEntity(type="italic", offset=5, length=2)]
-
-    assert realign_entities_after_strip(raw, stripped, entities) == []
+def test_plain_text_is_trimmed():
+    assert render_message_html(_message(text="  привет  ")) == "привет"
 
 
-def test_empty_entities_stay_empty():
-    assert realign_entities_after_strip("  a  ", "a", []) == []
-    assert realign_entities_after_strip("  a  ", "a", None) == []
+def test_sticker_has_no_text():
+    message = _message(
+        sticker=Sticker(
+            file_id="STK",
+            file_unique_id="U",
+            type="regular",
+            width=512,
+            height=512,
+            is_animated=False,
+            is_video=True,
+        )
+    )
+
+    assert render_message_html(message) == ""

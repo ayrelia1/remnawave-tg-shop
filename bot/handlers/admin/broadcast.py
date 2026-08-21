@@ -23,8 +23,7 @@ from bot.utils import (
     get_message_content,
     send_message_by_type,
     send_message_via_queue,
-    formatting_kwargs,
-    realign_entities_after_strip,
+    render_message_html,
     MessageContent,
 )
 
@@ -87,13 +86,11 @@ async def process_broadcast_message_handler(
 
     _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
 
-    # Определяем тип содержимого и сохраняем данные в state
-    raw_text = message.text or message.caption or ""
+    # Определяем тип содержимого и сохраняем данные в state.
+    # Форматирование админа переводим в HTML-теги: entities по проводу не
+    # выживают, потому что бот всегда шлёт parse_mode=HTML (см. render_message_html).
     content = get_message_content(message)
-    # get_message_content() strips the text; the offsets must follow it.
-    entities = realign_entities_after_strip(
-        raw_text, content.text or "", message.entities or message.caption_entities or []
-    )
+    content.text = render_message_html(message)
 
     # Если нет ни текста, ни медиа — ошибка
     if not content.text and not content.file_id:
@@ -103,7 +100,6 @@ async def process_broadcast_message_handler(
     # Сохраняем данные для рассылки
     await state.update_data(
         broadcast_text=content.text,
-        broadcast_entities=entities,
         broadcast_content_type=content.content_type,
         broadcast_file_id=content.file_id,
         broadcast_target="all",
@@ -115,9 +111,9 @@ async def process_broadcast_message_handler(
             bot,
             chat_id=message.chat.id,
             content=content,
+            parse_mode="HTML",
             disable_web_page_preview=True,
             disable_notification=True,
-            **formatting_kwargs(content.content_type, entities),
         )
     except TelegramBadRequest as e:
         await message.answer(
@@ -246,8 +242,7 @@ async def confirm_broadcast_callback_handler(
             file_id=user_fsm_data.get("broadcast_file_id"),
             text=user_fsm_data.get("broadcast_text")
         )
-        entities = user_fsm_data.get("broadcast_entities", [])
-        
+
         if not content.text and content.content_type == "text":
             await callback.message.edit_text(_("admin_broadcast_error_no_message"))
             await state.clear()
@@ -291,8 +286,8 @@ async def confirm_broadcast_callback_handler(
                     queue_manager,
                     uid,
                     content,
+                    parse_mode="HTML",
                     disable_web_page_preview=True,
-                    **formatting_kwargs(content.content_type, entities),
                 )
                 sent_count += 1
                 
