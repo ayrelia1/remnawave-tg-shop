@@ -140,6 +140,31 @@ class Settings(BaseSettings):
         ),
     )
 
+    HELEKET_ENABLED: bool = Field(default=False)
+    HELEKET_MERCHANT_ID: Optional[str] = Field(
+        default=None, description="Heleket merchant UUID (Dashboard -> Settings)"
+    )
+    HELEKET_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Heleket *payment* API key. The payout key will not work here.",
+    )
+    HELEKET_BASE_URL: str = Field(default="https://api.heleket.com")
+    HELEKET_TO_CURRENCY: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional crypto ticker to settle the invoice in (e.g. USDT). "
+            "Left empty, the payer picks any coin Heleket offers."
+        ),
+    )
+    HELEKET_LIFETIME_SECONDS: int = Field(
+        default=3600,
+        ge=300,
+        le=43200,
+        description="Invoice validity window; Heleket allows 300..43200 seconds.",
+    )
+    HELEKET_RETURN_URL: Optional[str] = Field(default=None)
+    HELEKET_SUCCESS_URL: Optional[str] = Field(default=None)
+
     FREEKASSA_ENABLED: bool = Field(default=False)
     FREEKASSA_MERCHANT_ID: Optional[str] = None
     FREEKASSA_FIRST_SECRET: Optional[str] = None
@@ -167,7 +192,7 @@ class Settings(BaseSettings):
     )
     PAYMENT_METHODS_ORDER: Optional[str] = Field(
         default=None,
-        description="Comma-separated list of payment methods to show (e.g., severpay,freekassa,yookassa,platega,stars,cryptopay)",
+        description="Comma-separated list of payment methods to show (e.g., severpay,freekassa,yookassa,platega,stars,heleket,cryptopay)",
     )
 
     MONTH_1_ENABLED: bool = Field(default=True, alias="1_MONTH_ENABLED")
@@ -435,6 +460,19 @@ class Settings(BaseSettings):
         base = self.WEBHOOK_BASE_URL
         if base:
             return f"{base.rstrip('/')}{self.severpay_webhook_path}"
+        return None
+
+    @computed_field
+    @property
+    def heleket_webhook_path(self) -> str:
+        return "/webhook/heleket"
+
+    @computed_field
+    @property
+    def heleket_full_webhook_url(self) -> Optional[str]:
+        base = self.WEBHOOK_BASE_URL
+        if base:
+            return f"{base.rstrip('/')}{self.heleket_webhook_path}"
         return None
 
     @computed_field
@@ -711,6 +749,7 @@ class Settings(BaseSettings):
             "severpay",
             "yookassa",
             "stars",
+            "heleket",
             "cryptopay",
         ]
         if not self.PAYMENT_METHODS_ORDER:
@@ -792,6 +831,8 @@ class Settings(BaseSettings):
 
     @field_validator(
         'REQUIRED_CHANNEL_LINK',
+        'HELEKET_RETURN_URL',
+        'HELEKET_SUCCESS_URL',
         'PLATEGA_RETURN_URL',
         'PLATEGA_FAILED_URL',
         'SEVERPAY_RETURN_URL',
@@ -972,6 +1013,18 @@ def get_settings() -> Settings:
                 ):
                     logging.warning(
                         "CRITICAL: Platega is enabled but merchant credentials (PLATEGA_MERCHANT_ID/PLATEGA_SECRET) are missing. Platega payments will not work."
+                    )
+            if _settings_instance.HELEKET_ENABLED:
+                if (
+                    not _settings_instance.HELEKET_MERCHANT_ID
+                    or not _settings_instance.HELEKET_API_KEY
+                ):
+                    logging.warning(
+                        "CRITICAL: Heleket is enabled but HELEKET_MERCHANT_ID/HELEKET_API_KEY are missing. Heleket payments will not work."
+                    )
+                if not _settings_instance.WEBHOOK_BASE_URL:
+                    logging.warning(
+                        "CRITICAL: Heleket is enabled but WEBHOOK_BASE_URL is not set. Heleket cannot deliver payment callbacks, so subscriptions will never activate."
                     )
             if _settings_instance.SEVERPAY_ENABLED:
                 if not _settings_instance.SEVERPAY_MID or not _settings_instance.SEVERPAY_TOKEN:

@@ -255,6 +255,7 @@ class NotificationService:
             "crypto_pay": "₿",
             "stars": "⭐",
             "platega": "💳",
+            "heleket": "₿",
             "severpay": "💳",
         }.get(payment_provider.lower(), "💰")
 

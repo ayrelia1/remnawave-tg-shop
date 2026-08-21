@@ -29,6 +29,7 @@ async def build_and_start_web_app(
         "panel_service",
         "stars_service",
         "freekassa_service",
+        "heleket_service",
         "cryptopay_service",
         "panel_webhook_service",
         "platega_service",
@@ -63,6 +64,7 @@ async def build_and_start_web_app(
     from bot.services.crypto_pay_service import cryptopay_webhook_route
     from bot.services.panel_webhook_service import panel_webhook_route
     from bot.services.freekassa_service import freekassa_webhook_route
+    from bot.services.heleket_service import heleket_webhook_route
     from bot.services.platega_service import platega_webhook_route
     from bot.services.severpay_service import severpay_webhook_route
 
@@ -75,6 +77,11 @@ async def build_and_start_web_app(
     if fk_path.startswith("/"):
         app.router.add_post(fk_path, freekassa_webhook_route)
         logging.info(f"FreeKassa webhook route configured at: [POST] {fk_path}")
+
+    hk_path = settings.heleket_webhook_path
+    if hk_path.startswith("/"):
+        app.router.add_post(hk_path, heleket_webhook_route)
+        logging.info(f"Heleket webhook route configured at: [POST] {hk_path}")
 
     pg_path = settings.platega_webhook_path
     if pg_path.startswith("/"):

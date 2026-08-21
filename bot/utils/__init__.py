@@ -33,6 +33,60 @@ def filter_kwargs(content_type: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in kwargs.items() if k in supported}
 
 
+def _utf16_len(text: str) -> int:
+    """Length in UTF-16 code units - the unit Telegram entity offsets use."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def realign_entities_after_strip(raw_text: str, stripped_text: str, entities):
+    """Re-anchor entity offsets after get_message_content() trimmed the text.
+
+    Entity offsets are UTF-16 code units counted against the *original* text,
+    so trimming leading whitespace shifts every one of them left. Sending the
+    untouched offsets makes Telegram paint the formatting onto the wrong
+    characters or reject the message outright.
+
+    Formatting entities that overhang the trimmed text are clamped; a
+    custom_emoji is dropped instead, because its length has to match the
+    placeholder emoji exactly and a clamped one is invalid.
+    """
+    if not entities:
+        return []
+    if raw_text == stripped_text:
+        return list(entities)
+
+    shift = _utf16_len(raw_text[: len(raw_text) - len(raw_text.lstrip())])
+    limit = _utf16_len(stripped_text)
+
+    realigned = []
+    for entity in entities:
+        start = entity.offset - shift
+        end = start + entity.length
+        if start < 0 or end > limit:
+            if entity.type == "custom_emoji":
+                continue
+            start, end = max(0, start), min(limit, end)
+            if end <= start:
+                continue
+        realigned.append(entity.model_copy(update={"offset": start, "length": end - start}))
+    return realigned
+
+
+def formatting_kwargs(content_type: str, entities) -> Dict[str, Any]:
+    """Pick between forwarding entities and asking Telegram to parse HTML.
+
+    The two are mutually exclusive: when a request carries both `parse_mode`
+    and `entities`, Telegram honours `parse_mode` and silently drops the
+    entities - which is how premium (custom) emoji degrade to plain glyphs.
+    So entities win whenever the admin's message has any, and HTML parsing is
+    offered only for a message that carries no formatting of its own.
+    """
+    if entities:
+        key = "entities" if content_type == "text" else "caption_entities"
+        return {key: list(entities)}
+    return {"parse_mode": "HTML"}
+
+
 def get_message_content(message: types.Message) -> MessageContent:
     """
     Определяет тип контента сообщения и возвращает его данные.

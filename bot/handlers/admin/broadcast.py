@@ -19,7 +19,14 @@ from bot.keyboards.inline.admin_keyboards import (
 )
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_queue import get_queue_manager
-from bot.utils import get_message_content, send_message_by_type, send_message_via_queue, MessageContent
+from bot.utils import (
+    get_message_content,
+    send_message_by_type,
+    send_message_via_queue,
+    formatting_kwargs,
+    realign_entities_after_strip,
+    MessageContent,
+)
 
 router = Router(name="admin_broadcast_router")
 
@@ -81,8 +88,12 @@ async def process_broadcast_message_handler(
     _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
 
     # Определяем тип содержимого и сохраняем данные в state
-    entities = message.entities or message.caption_entities or []
+    raw_text = message.text or message.caption or ""
     content = get_message_content(message)
+    # get_message_content() strips the text; the offsets must follow it.
+    entities = realign_entities_after_strip(
+        raw_text, content.text or "", message.entities or message.caption_entities or []
+    )
 
     # Если нет ни текста, ни медиа — ошибка
     if not content.text and not content.file_id:
@@ -100,27 +111,14 @@ async def process_broadcast_message_handler(
 
     # Отправляем превью-копию того, что будет разослано
     try:
-        # Для медиа-сообщений используем caption_entities, для текста - entities
-        if content.content_type == "text":
-            await send_message_by_type(
-                bot, 
-                chat_id=message.chat.id, 
-                content=content,
-                parse_mode="HTML",
-                entities=entities,
-                disable_web_page_preview=True,
-                disable_notification=True,
-            )
-        else:
-            await send_message_by_type(
-                bot, 
-                chat_id=message.chat.id, 
-                content=content,
-                parse_mode="HTML",
-                caption_entities=entities,
-                disable_web_page_preview=True,
-                disable_notification=True,
-            )
+        await send_message_by_type(
+            bot,
+            chat_id=message.chat.id,
+            content=content,
+            disable_web_page_preview=True,
+            disable_notification=True,
+            **formatting_kwargs(content.content_type, entities),
+        )
     except TelegramBadRequest as e:
         await message.answer(
             _(
@@ -289,25 +287,13 @@ async def confirm_broadcast_callback_handler(
         # Queue all messages for sending
         for uid in user_ids:
             try:
-                # Для медиа-сообщений используем caption_entities, для текста - entities
-                if content.content_type == "text":
-                    await send_message_via_queue(
-                        queue_manager, 
-                        uid, 
-                        content,
-                        parse_mode="HTML",
-                        entities=entities,
-                        disable_web_page_preview=True,
-                    )
-                else:
-                    await send_message_via_queue(
-                        queue_manager, 
-                        uid, 
-                        content,
-                        parse_mode="HTML",
-                        caption_entities=entities,
-                        disable_web_page_preview=True,
-                    )
+                await send_message_via_queue(
+                    queue_manager,
+                    uid,
+                    content,
+                    disable_web_page_preview=True,
+                    **formatting_kwargs(content.content_type, entities),
+                )
                 sent_count += 1
                 
                 # Log successful queuing

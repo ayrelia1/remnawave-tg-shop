@@ -370,6 +370,12 @@ def get_payment_method_keyboard(months: int, price: float,
                 callback_data=f"pay_stars:{value_str}:{stars_price}{mode_suffix}",
                 icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
             )
+        elif method == "heleket" and settings.HELEKET_ENABLED:
+            builder.button(
+                text=_("pay_with_heleket_button"),
+                callback_data=f"pay_heleket:{value_str}:{price}{mode_suffix}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_CRYPTO,
+            )
         elif method == "cryptopay" and settings.CRYPTOPAY_ENABLED:
             builder.button(
                 text=_("pay_with_cryptopay_button"),

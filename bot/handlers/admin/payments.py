@@ -51,6 +51,7 @@ def format_payment_text(payment: Payment, i18n: JsonI18n, lang: str, settings: S
         'pending_yookassa',
         'pending_freekassa',
         'pending_platega',
+        'pending_heleket',
         'pending_severpay',
         'pending_cryptopay',
     ]
@@ -73,6 +74,7 @@ def format_payment_text(payment: Payment, i18n: JsonI18n, lang: str, settings: S
         'freekassa': 'FreeKassa',
         'severpay': 'SeverPay',
         'platega': 'Platega',
+        'heleket': 'Heleket',
     }.get(payment.provider, payment.provider or 'Unknown')
 
     traffic_mode = getattr(settings, "traffic_sale_mode", False)

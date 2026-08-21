@@ -186,6 +186,7 @@ async def show_statistics_handler(callback: types.CallbackQuery,
                 "pending_yookassa",
                 "pending_freekassa",
                 "pending_platega",
+                "pending_heleket",
                 "pending_severpay",
                 "pending_cryptopay",
             ]

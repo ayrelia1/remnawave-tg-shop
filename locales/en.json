@@ -62,6 +62,7 @@
   "pay_with_severpay_button": "SeverPay",
   "back_to_payment_methods_button": "Back",
   "pay_with_cryptopay_button": "CryptoBot",
+  "pay_with_heleket_button": "Crypto (Heleket)",
   "pay_with_stars_button": "Telegram Stars",
   "connect_button": "Connect",
   "cancel_button": "Cancel",
