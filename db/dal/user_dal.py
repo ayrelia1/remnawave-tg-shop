@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import update, delete, func, and_, or_
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import (
@@ -337,6 +337,37 @@ async def get_user_ids_without_active_subscription(session: AsyncSession) -> Lis
             and_(
                 User.is_banned == False,
                 ~User.user_id.in_(active_subs_subq),
+            )
+        )
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def get_user_ids_with_long_expired_subscription(
+    session: AsyncSession, min_days_since_expiry: int
+) -> List[int]:
+    """Return non-banned user IDs whose subscriptions all ended at least
+    `min_days_since_expiry` days ago, plus users who never had one.
+
+    A user is excluded as soon as any of their subscription rows ends after the
+    cutoff. That single condition covers both cases the caller wants skipped:
+    a subscription still running (end_date in the future) and one that lapsed
+    too recently to re-target with a win-back offer.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=min_days_since_expiry)
+
+    recent_subs_subq = (
+        select(Subscription.user_id)
+        .where(Subscription.end_date > cutoff)
+    ).scalar_subquery()
+
+    stmt = (
+        select(User.user_id)
+        .where(
+            and_(
+                User.is_banned == False,
+                ~User.user_id.in_(recent_subs_subq),
             )
         )
     )

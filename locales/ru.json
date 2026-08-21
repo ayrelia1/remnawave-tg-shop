@@ -179,6 +179,7 @@
   "broadcast_target_all_button": "Все",
   "broadcast_target_active_button": "Активные",
   "broadcast_target_inactive_button": "Неактивные",
+  "broadcast_target_expired_button": "Ушли {days}+ дн.",
   "confirm_broadcast_send_button": "Отправить",
   "cancel_broadcast_button": "Отмена",
   "admin_broadcast_sending_started": "Начинаю рассылку...",

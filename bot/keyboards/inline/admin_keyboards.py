@@ -28,6 +28,7 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_SETTINGS,
     PREMIUM_EMOJI_STATS,
     PREMIUM_EMOJI_TAG,
+    PREMIUM_EMOJI_TIMER,
     PREMIUM_EMOJI_USER,
     PREMIUM_EMOJI_YES,
 )
@@ -609,41 +610,32 @@ def get_confirmation_keyboard(yes_callback_data: str, no_callback_data: str,
 
 def get_broadcast_confirmation_keyboard(lang: str,
                                         i18n_instance,
-                                        target: str = "all") -> InlineKeyboardMarkup:
+                                        target: str = "all",
+                                        expired_days: int = 5) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
-
-    # Row: target selection (all / active / inactive)
-    target_all_label = _(
-        key="broadcast_target_all_button"
-    )
-    target_active_label = _(
-        key="broadcast_target_active_button"
-    )
-    target_inactive_label = _(
-        key="broadcast_target_inactive_button"
-    )
 
     # Highlight current selection with a prefix
     def mark_selected(label: str, is_selected: bool) -> str:
         return ("• " + label) if is_selected else label
 
-    builder.button(
-        text=mark_selected(target_all_label, target == "all"),
-        callback_data="broadcast_target:all",
-        icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
+    # Rows: target selection (all / active / inactive / long-expired)
+    targets = (
+        ("all", _(key="broadcast_target_all_button"), PREMIUM_EMOJI_REFERRAL),
+        ("active", _(key="broadcast_target_active_button"), PREMIUM_EMOJI_YES),
+        ("inactive", _(key="broadcast_target_inactive_button"), PREMIUM_EMOJI_CLOCK_PANEL),
+        (
+            "expired",
+            _(key="broadcast_target_expired_button", days=expired_days),
+            PREMIUM_EMOJI_TIMER,
+        ),
     )
-    builder.button(
-        text=mark_selected(target_active_label, target == "active"),
-        callback_data="broadcast_target:active",
-        icon_custom_emoji_id=PREMIUM_EMOJI_YES,
-    )
-    builder.button(
-        text=mark_selected(target_inactive_label, target == "inactive"),
-        callback_data="broadcast_target:inactive",
-        icon_custom_emoji_id=PREMIUM_EMOJI_CLOCK_PANEL,
-    )
-    builder.adjust(3)
+    for target_key, label, emoji_id in targets:
+        builder.button(
+            text=mark_selected(label, target == target_key),
+            callback_data=f"broadcast_target:{target_key}",
+            icon_custom_emoji_id=emoji_id,
+        )
 
     # Row: confirmation
     builder.button(
@@ -656,7 +648,9 @@ def get_broadcast_confirmation_keyboard(lang: str,
         callback_data="broadcast_final_action:cancel",
         icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
     )
-    builder.adjust(2)
+    # One adjust() call for the whole markup: repeated adjust() re-flows every
+    # button, so the targets and the send/cancel pair must be sized together.
+    builder.adjust(2, 2, 2)
     return builder.as_markup()
 
 

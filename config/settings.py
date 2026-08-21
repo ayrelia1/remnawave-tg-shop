@@ -31,6 +31,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    BROADCAST_EXPIRED_MIN_DAYS: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Win-back broadcast target: only reach users whose subscription "
+            "ended at least this many days ago. Users with a running "
+            "subscription, or one that lapsed more recently, are skipped."
+        ),
+    )
+
     SUPPORT_LINK: Optional[str] = Field(default=None)
     SERVER_STATUS_URL: Optional[str] = Field(default=None)
     TERMS_OF_SERVICE_URL: Optional[str] = Field(default=None)

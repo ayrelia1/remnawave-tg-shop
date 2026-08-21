@@ -23,6 +23,9 @@ from bot.utils import get_message_content, send_message_by_type, send_message_vi
 
 router = Router(name="admin_broadcast_router")
 
+# Audience selectors offered on the confirmation keyboard.
+BROADCAST_TARGETS = {"all", "active", "inactive", "expired"}
+
 
 async def broadcast_message_prompt_handler(
     callback: types.CallbackQuery,
@@ -132,7 +135,12 @@ async def process_broadcast_message_handler(
 
     await message.answer(
         confirmation_prompt,
-        reply_markup=get_broadcast_confirmation_keyboard(current_lang, i18n, target="all"),
+        reply_markup=get_broadcast_confirmation_keyboard(
+            current_lang,
+            i18n,
+            target="all",
+            expired_days=settings.BROADCAST_EXPIRED_MIN_DAYS,
+        ),
     )
     await state.set_state(AdminStates.confirming_broadcast)
 
@@ -154,12 +162,11 @@ async def change_broadcast_target_handler(
         return
 
     new_target = callback.data.split(":")[1]
-    if new_target not in {"all", "active", "inactive"}:
+    if new_target not in BROADCAST_TARGETS:
         await callback.answer("Unknown target.", show_alert=True)
         return
 
     await state.update_data(broadcast_target=new_target)
-    user_fsm_data = await state.get_data()
     _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
     confirmation_prompt = _(
         "admin_broadcast_confirm_prompt_short"
@@ -168,7 +175,10 @@ async def change_broadcast_target_handler(
         await callback.message.edit_text(
             confirmation_prompt,
             reply_markup=get_broadcast_confirmation_keyboard(
-                current_lang, i18n, target=new_target
+                current_lang,
+                i18n,
+                target=new_target,
+                expired_days=settings.BROADCAST_EXPIRED_MIN_DAYS,
             ),
         )
     except Exception as exc:
@@ -256,6 +266,10 @@ async def confirm_broadcast_callback_handler(
             user_ids = await user_dal.get_user_ids_with_active_subscription(session)
         elif target == "inactive":
             user_ids = await user_dal.get_user_ids_without_active_subscription(session)
+        elif target == "expired":
+            user_ids = await user_dal.get_user_ids_with_long_expired_subscription(
+                session, settings.BROADCAST_EXPIRED_MIN_DAYS
+            )
         else:
             user_ids = await user_dal.get_all_active_user_ids_for_broadcast(session)
 
