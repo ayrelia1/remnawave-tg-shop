@@ -137,10 +137,7 @@ async def on_startup_configured(dispatcher: Dispatcher):
         commands.append(BotCommand(command="start", description=settings.START_COMMAND_DESCRIPTION))
     if settings.PROMO_COMMAND_DESCRIPTION:
         commands.append(BotCommand(command="promo", description=settings.PROMO_COMMAND_DESCRIPTION))
-    if settings.PARTNER_PROGRAM_ENABLED and settings.PARTNER_COMMAND_DESCRIPTION:
-        commands.append(
-            BotCommand(command="partner", description=settings.PARTNER_COMMAND_DESCRIPTION)
-        )
+
     if commands:
         try:
             await bot.set_my_commands(commands)
