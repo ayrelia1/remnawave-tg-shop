@@ -152,6 +152,10 @@ async def admin_panel_actions_callback_handler(
     elif action == "ads_create":
         from . import ads as admin_ads_handlers
         await admin_ads_handlers.ads_create_start(callback, state, settings, i18n_data)
+    elif action == "currency_rates":
+        from . import currency_rates as admin_currency_rates_handlers
+        await admin_currency_rates_handlers.show_rates(
+            callback, state, settings, i18n_data, session)
     elif action == "backup_now":
         await callback.answer(_("admin_backup_starting"), show_alert=False)
         if not backup_service:

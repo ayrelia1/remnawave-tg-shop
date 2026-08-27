@@ -32,8 +32,9 @@ LOCALE_CONSUMERS = HANDLER_FILES + (
     "bot/keyboards/inline/partner_keyboards.py",
     "bot/keyboards/inline/admin_keyboards.py",
 )
-# Pre-existing passive page counter, deliberately unhandled.
-UNHANDLED_BY_DESIGN = {"ads_page_display"}
+# Every callback we emit must be claimed by a handler, the passive
+# "page X/Y" labels included — otherwise the client spins forever.
+UNHANDLED_BY_DESIGN: set = set()
 
 
 class FakeI18n:
@@ -307,3 +308,78 @@ def test_alert_strings_stay_plain_text(locales):
             value = table[key]
             assert "::" not in value, key
             assert "<" not in value, key
+
+# --------------------------------------------------------------------------- #
+# Dispatcher reachability
+# --------------------------------------------------------------------------- #
+#
+# `admin_action:*`, `admin_section:*` and `main_action:*` are each claimed by a
+# single catch-all handler that dispatches on an if/elif chain, and those
+# routers are registered before ours. A handler of our own for one of those
+# callbacks is therefore dead code: the chain wins, and an action missing from
+# it answers "unknown action" instead. These tests check the chain itself.
+
+# prefix -> (module, dispatcher function, name of the variable it switches on)
+DISPATCHERS = {
+    "admin_action": (
+        "bot/handlers/admin/common.py",
+        "admin_panel_actions_callback_handler",
+        "action",
+    ),
+    "admin_section": (
+        "bot/handlers/admin/common.py",
+        "admin_section_handler",
+        "section",
+    ),
+    "main_action": (
+        "bot/handlers/user/start.py",
+        "main_action_callback_handler",
+        "action",
+    ),
+}
+
+
+def _dispatched_actions(path: str, function_name: str, variable: str = "action") -> set:
+    """Every literal the dispatcher compares its switch variable against."""
+    tree = ast.parse(io.open(REPO_ROOT / path, encoding="utf-8").read(), path)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name != function_name:
+            continue
+        actions = set()
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Compare):
+                continue
+            if not (isinstance(inner.left, ast.Name) and inner.left.id == variable):
+                continue
+            for comparator in inner.comparators:
+                if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
+                    actions.add(comparator.value)
+        return actions
+    raise AssertionError(f"{function_name} not found in {path}")
+
+
+def test_every_dispatched_callback_reaches_its_branch():
+    unreachable = []
+    for markup in all_markups():
+        for row in markup.inline_keyboard:
+            for button in row:
+                data = button.callback_data
+                if not data or ":" not in data:
+                    continue
+                prefix, _sep, rest = data.partition(":")
+                if prefix not in DISPATCHERS:
+                    continue
+                action = rest.split(":")[0]
+                path, function_name, variable = DISPATCHERS[prefix]
+                if action not in _dispatched_actions(path, function_name, variable):
+                    unreachable.append((data, f"{path}::{function_name}"))
+    assert unreachable == []
+
+
+def test_currency_rates_screen_is_wired_into_the_admin_dispatcher():
+    """The screen is opened from the system-functions menu, not by our router."""
+    actions = _dispatched_actions(*DISPATCHERS["admin_action"])
+    assert "currency_rates" in actions
+    assert "ads" in actions

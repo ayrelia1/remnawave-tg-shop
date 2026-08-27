@@ -157,6 +157,12 @@ async def _safe_edit(callback: types.CallbackQuery, text: str, markup) -> None:
         logging.debug("Failed to edit ads message: %s", e)
 
 
+@router.callback_query(F.data == "ads_page_display")
+async def ads_page_display_noop(callback: types.CallbackQuery):
+    """Passive "page X/Y" label — answer so the client stops spinning."""
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_action:ads")
 async def show_ads_menu(callback: types.CallbackQuery, settings: Settings, i18n_data: dict, session: AsyncSession):
     current_lang, i18n = _lang_and_i18n(settings, i18n_data)
