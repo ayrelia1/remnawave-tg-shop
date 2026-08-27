@@ -609,7 +609,7 @@
   "partner_payout_not_found": "Payout not found.",
   "partner_payout_detail": "::doc:: <b>Payout #{id}</b>\n\n::tag:: Program: <b>{source}</b>\n::coin:: Amount: <b>{amount} {currency}</b>\n::calendar:: Date: <b>{date}</b>\n::info:: Comment: {comment}",
   "partner_payout_no_comment": "—",
-  "admin_ads_unpriced_warning": "⚠️ Payments not counted: <b>{count}</b> — their currency has no rate. Set one under \"Currency rates\" and they will be picked up automatically.",
+  "admin_ads_unvalued_warning": "⚠️ Payments not counted: <b>{count}</b> — their currency has no rate. Set one under \"Currency rates\" and they will be picked up automatically.",
   "admin_ads_payout_unknown_currency": "Currency {currency} has no rate. Add one under \"Currency rates\", or enter the amount in another currency.",
   "admin_currency_rates_button": "Currency rates",
   "admin_currency_rates_header": "💱 <b>Currency rates</b>\nBase currency: <b>{base}</b>\n\nThe rate is applied when a payment is made and frozen on the payment itself. Changing a rate does not revalue history — it only affects new payments.",

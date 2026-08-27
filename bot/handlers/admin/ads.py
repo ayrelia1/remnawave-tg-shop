@@ -46,7 +46,7 @@ def _lang_and_i18n(settings: Settings, i18n_data: dict) -> Tuple[str, Optional[J
     )
 
 
-async def _overview_text(session: AsyncSession, settings: Settings, _) -> str:
+async def _overview_text(session: AsyncSession, _) -> str:
     totals = await ad_dal.get_totals(session)
     return _(
         "admin_ads_overview",
@@ -57,11 +57,9 @@ async def _overview_text(session: AsyncSession, settings: Settings, _) -> str:
     )
 
 
-async def _render_ads_list(
-    session: AsyncSession, settings: Settings, i18n: JsonI18n, lang: str, page: int
-):
+async def _render_ads_list(session: AsyncSession, i18n: JsonI18n, lang: str, page: int):
     _ = _l(i18n, lang)
-    text = await _overview_text(session, settings, _)
+    text = await _overview_text(session, _)
     total_count = await ad_dal.count_campaigns(session)
 
     if total_count == 0:
@@ -83,7 +81,6 @@ async def _render_ads_list(
 
 async def _render_campaign_card(
     session: AsyncSession,
-    settings: Settings,
     i18n: JsonI18n,
     lang: str,
     campaign: AdCampaign,
@@ -123,14 +120,10 @@ async def _render_campaign_card(
             balance=f"{stats['balance']:.2f}",
             currency=BASE_CURRENCY,
         )
-        if stats["unpriced"]:
-            text += "\n\n" + _("admin_ads_unpriced_warning", count=stats["unpriced"])
+        if stats["unvalued"]:
+            text += "\n\n" + _("admin_ads_unvalued_warning", count=stats["unvalued"])
     else:
-        await ad_dal.sync_campaign_accruals(
-            session, campaign.ad_campaign_id
-        )
         stats = await ad_dal.get_campaign_stats(session, campaign.ad_campaign_id)
-        unpriced = await ad_dal.count_unpriced_payments(session, campaign.ad_campaign_id)
         text = _(
             "admin_ads_card",
             id=campaign.ad_campaign_id,
@@ -144,8 +137,8 @@ async def _render_campaign_card(
             revenue=f"{stats['revenue']:.2f}",
             currency=BASE_CURRENCY,
         )
-        if unpriced:
-            text += "\n\n" + _("admin_ads_unpriced_warning", count=unpriced)
+        if stats["unvalued"]:
+            text += "\n\n" + _("admin_ads_unvalued_warning", count=stats["unvalued"])
 
     markup = get_ad_card_keyboard(
         i18n, lang, campaign.ad_campaign_id, back_page, is_partner=campaign.is_partner
@@ -173,7 +166,7 @@ async def show_ads_menu(callback: types.CallbackQuery, settings: Settings, i18n_
         await callback.answer("Language error.", show_alert=True)
         return
 
-    text, markup = await _render_ads_list(session, settings, i18n, current_lang, 0)
+    text, markup = await _render_ads_list(session, i18n, current_lang, 0)
     await _safe_edit(callback, text, markup)
     try:
         await callback.answer()
@@ -194,7 +187,7 @@ async def ads_list_pagination(callback: types.CallbackQuery, state: FSMContext, 
     except Exception:
         page = 0
 
-    text, markup = await _render_ads_list(session, settings, i18n, current_lang, page)
+    text, markup = await _render_ads_list(session, i18n, current_lang, page)
     await _safe_edit(callback, text, markup)
     await callback.answer()
 
@@ -222,7 +215,7 @@ async def show_ad_card(callback: types.CallbackQuery, state: FSMContext, setting
 
     try:
         text, markup = await _render_campaign_card(
-            session, settings, i18n, current_lang, camp, back_page
+            session, i18n, current_lang, camp, back_page
         )
     except Exception as e:
         logging.error(f"Failed to build ad card {camp_id}: {e}", exc_info=True)
@@ -283,7 +276,7 @@ async def ads_delete_cancel(callback: types.CallbackQuery, settings: Settings, i
         return
 
     text, markup = await _render_campaign_card(
-        session, settings, i18n, current_lang, camp, back_page
+        session, i18n, current_lang, camp, back_page
     )
     await _safe_edit(callback, text, markup)
     await callback.answer()
@@ -311,7 +304,7 @@ async def ads_delete_confirm(callback: types.CallbackQuery, settings: Settings, 
         return
     await session.commit()
 
-    text, markup = await _render_ads_list(session, settings, i18n, current_lang, back_page)
+    text, markup = await _render_ads_list(session, i18n, current_lang, back_page)
     await _safe_edit(callback, text, markup)
     await callback.answer(_("admin_ads_deleted_success"), show_alert=True)
 
@@ -435,7 +428,7 @@ async def ads_create_flow(message: types.Message, state: FSMContext, settings: S
             await message.answer(_("admin_ads_invalid_percent"))
             return
         await _finish_campaign_creation(
-            message, state, session, settings, i18n, current_lang, percent=percent
+            message, state, session, i18n, current_lang, percent=percent
         )
         return
 
@@ -449,7 +442,7 @@ async def ads_create_flow(message: types.Message, state: FSMContext, settings: S
             await message.answer(_("admin_ads_invalid_cost"))
             return
         await _finish_campaign_creation(
-            message, state, session, settings, i18n, current_lang, cost=cost
+            message, state, session, i18n, current_lang, cost=cost
         )
         return
 
@@ -458,7 +451,6 @@ async def _finish_campaign_creation(
     message: types.Message,
     state: FSMContext,
     session: AsyncSession,
-    settings: Settings,
     i18n: JsonI18n,
     lang: str,
     *,
@@ -730,7 +722,7 @@ async def ads_payout_save(callback: types.CallbackQuery, state: FSMContext, sett
 
     await state.clear()
     text, markup = await _render_campaign_card(
-        session, settings, i18n, current_lang, campaign, back_page
+        session, i18n, current_lang, campaign, back_page
     )
     await _safe_edit(callback, text, markup)
     await callback.answer(_("admin_ads_payout_saved"), show_alert=True)
@@ -738,7 +730,6 @@ async def ads_payout_save(callback: types.CallbackQuery, state: FSMContext, sett
 
 async def _render_payouts(
     session: AsyncSession,
-    settings: Settings,
     i18n: JsonI18n,
     lang: str,
     campaign: AdCampaign,
@@ -795,7 +786,7 @@ async def ads_payouts_list(callback: types.CallbackQuery, settings: Settings, i1
         return
 
     text, markup = await _render_payouts(
-        session, settings, i18n, current_lang, campaign, back_page, page
+        session, i18n, current_lang, campaign, back_page, page
     )
     await _safe_edit(callback, text, markup)
     await callback.answer()
@@ -879,7 +870,7 @@ async def ads_payout_delete_confirm(callback: types.CallbackQuery, settings: Set
     await session.commit()
 
     text, markup = await _render_payouts(
-        session, settings, i18n, current_lang, campaign, back_page, page
+        session, i18n, current_lang, campaign, back_page, page
     )
     await _safe_edit(callback, text, markup)
     await callback.answer(_("admin_ads_payout_deleted"), show_alert=True)

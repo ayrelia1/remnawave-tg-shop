@@ -45,7 +45,7 @@ def _parse_rate(raw: str) -> Optional[float]:
     return value
 
 
-async def _render(session: AsyncSession, settings: Settings, i18n: JsonI18n, lang: str):
+async def _render(session: AsyncSession, i18n: JsonI18n, lang: str):
     _ = lambda key, **kwargs: i18n.gettext(lang, key, **kwargs)
     rates = await currency_dal.list_rates(session)
     unvalued = await payment_dal.count_unvalued_payments(session)
@@ -86,7 +86,7 @@ async def show_rates(
     await state.clear()
     # Self-heal: the base currency must always be present at exactly 1.0.
     await currency_dal.ensure_base_rate(session, BASE_CURRENCY)
-    text, markup = await _render(session, settings, i18n, current_lang)
+    text, markup = await _render(session, i18n, current_lang)
     await _safe_edit(callback, text, markup)
     await callback.answer()
 
@@ -175,7 +175,6 @@ async def _save(
     message: types.Message,
     state: FSMContext,
     session: AsyncSession,
-    settings: Settings,
     i18n: JsonI18n,
     lang: str,
     code: str,
@@ -220,7 +219,7 @@ async def _save(
         text += "\n" + _("admin_currency_rate_valued", count=valued)
     await message.answer(text, parse_mode="HTML")
 
-    list_text, markup = await _render(session, settings, i18n, lang)
+    list_text, markup = await _render(session, i18n, lang)
     await message.answer(list_text, reply_markup=markup, parse_mode="HTML")
 
 
@@ -249,7 +248,7 @@ async def receive_rate(
         await message.answer(_("admin_currency_rate_invalid_value"))
         return
 
-    await _save(message, state, session, settings, i18n, current_lang, code, rate)
+    await _save(message, state, session, i18n, current_lang, code, rate)
 
 
 @router.message(StateFilter(AdminStates.waiting_for_new_currency), F.text)
@@ -276,4 +275,4 @@ async def receive_new_currency(
         await message.answer(_("admin_currency_rate_invalid_value"))
         return
 
-    await _save(message, state, session, settings, i18n, current_lang, code, rate)
+    await _save(message, state, session, i18n, current_lang, code, rate)

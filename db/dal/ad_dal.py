@@ -270,7 +270,7 @@ async def sync_campaign_accruals(session: AsyncSession, campaign_id: int) -> int
     A safety net: the ledger is normally written when a payment succeeds, but a
     read must never under-report because one of those writes was missed.
     Payments still unvalued (no rate for their currency) are skipped and left
-    for `count_unpriced_payments` to surface. Returns the number of rows added.
+    for `count_unvalued_payments` to surface. Returns the number of rows added.
     """
     campaign = await get_campaign_by_id(session, campaign_id)
     if campaign is None:
@@ -296,8 +296,11 @@ async def sync_campaign_accruals(session: AsyncSession, campaign_id: int) -> int
     return len(rows)
 
 
-async def count_unpriced_payments(session: AsyncSession, campaign_id: int) -> int:
-    """Eligible payments the ledger cannot value — a missing currency rate."""
+async def count_unvalued_payments(session: AsyncSession, campaign_id: int) -> int:
+    """Eligible payments the ledger cannot value yet — a missing currency rate.
+
+    Mirrors `payment_dal.count_unvalued_payments`, scoped to one campaign.
+    """
     stmt = (
         select(func.count())
         .select_from(Payment)
@@ -325,6 +328,14 @@ def _window_cutoffs(now: Optional[datetime] = None) -> Dict[str, datetime]:
 
 
 async def get_campaign_stats(session: AsyncSession, campaign_id: int) -> Dict[str, Any]:
+    """Headline figures for an ad label, read from the ledger.
+
+    Materialises any missing ledger rows first, for the same reason
+    `get_partner_stats` does: a read must never under-report because a write
+    was missed. Both readers therefore behave identically.
+    """
+    await sync_campaign_accruals(session, campaign_id)
+
     starts_stmt = select(func.count(AdAttribution.user_id)).where(
         _campaign_users(campaign_id)
     )
@@ -349,6 +360,7 @@ async def get_campaign_stats(session: AsyncSession, campaign_id: int) -> Dict[st
         "trials": int(trials),
         "payers": int(payers or 0),
         "revenue": round(float(revenue or 0.0), 2),
+        "unvalued": await count_unvalued_payments(session, campaign_id),
     }
 
 
@@ -524,7 +536,6 @@ async def get_partner_stats(
     campaign_id: int,
     *,
     now: Optional[datetime] = None,
-    sync: bool = True,
 ) -> Dict[str, Any]:
     """Detailed statistics for one campaign label, read from the ledger.
 
@@ -533,8 +544,7 @@ async def get_partner_stats(
     Changing a rate or a percent therefore only affects payments recorded
     afterwards — the history a partner has already been paid against cannot move.
     """
-    if sync:
-        await sync_campaign_accruals(session, campaign_id)
+    await sync_campaign_accruals(session, campaign_id)
 
     cutoffs = _window_cutoffs(now)
     starts = await _starts_breakdown(session, campaign_id, cutoffs)
@@ -568,7 +578,7 @@ async def get_partner_stats(
         "accrued": accrued,
         "paid_out": paid_out,
         "balance": round(accrued - paid_out, 2),
-        "unpriced": await count_unpriced_payments(session, campaign_id),
+        "unvalued": await count_unvalued_payments(session, campaign_id),
     }
 
 

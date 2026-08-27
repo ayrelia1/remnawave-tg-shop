@@ -49,7 +49,21 @@ async def _apply_base_amount(session: AsyncSession, payment: Payment) -> bool:
     """
     from .currency_dal import get_rate
 
-    rate = await get_rate(session, payment.currency)
+    try:
+        rate = await get_rate(session, payment.currency)
+    except Exception as e:
+        # The rate table being unreachable is a bookkeeping problem, not a
+        # reason to fail the purchase. The payment is recorded unvalued and
+        # picked up later by revalue_unvalued_payments.
+        logging.error(
+            "Could not look up a conversion rate for %s: %s. The payment is "
+            "recorded unvalued.",
+            payment.currency,
+            e,
+            exc_info=True,
+        )
+        return False
+
     if rate is None:
         logging.error(
             "No conversion rate configured for %s — payment for user %s is recorded "

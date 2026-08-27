@@ -128,8 +128,7 @@ def test_new_currency_parsing_rejects_malformed_input(raw):
 
 
 async def test_render_lists_configured_rates(session):
-    settings = make_settings()
-    text, markup = await screen._render(session, settings, FakeI18n(), "ru")
+    text, markup = await screen._render(session, FakeI18n(), "ru")
 
     assert "admin_currency_rates_header" in text
     labels = [b.text for row in markup.inline_keyboard for b in row]
@@ -146,7 +145,7 @@ def _callbacks(markup):
 
 
 async def test_base_currency_row_is_not_editable(session):
-    _text, markup = await screen._render(session, make_settings(), FakeI18n(), "ru")
+    _text, markup = await screen._render(session, FakeI18n(), "ru")
     data = _callbacks(markup)
     assert "admin_rates:base" in data
     assert "admin_rates:edit:RUB" not in data
@@ -174,7 +173,7 @@ async def test_deleting_the_base_currency_rate_is_refused(session):
 async def test_save_path_refuses_the_base_currency(session):
     message, state = FakeMessage(), FakeState()
     await screen._save(
-        message, state, session, make_settings(), FakeI18n(), "ru", "RUB", 2.0
+        message, state, session, FakeI18n(), "ru", "RUB", 2.0
     )
     assert message.answers == ["admin_currency_base_locked"]
     assert await currency_dal.get_rate(session, "RUB") == 1.0
@@ -214,7 +213,7 @@ async def test_render_warns_about_unvalued_payments(session):
     await session.flush()
     assert payment.base_amount is None
 
-    text, _markup = await screen._render(session, make_settings(), FakeI18n(), "ru")
+    text, _markup = await screen._render(session, FakeI18n(), "ru")
     assert "admin_currency_rates_unvalued" in text
 
 
@@ -233,7 +232,7 @@ async def test_saving_a_rate_values_waiting_payments(session):
 
     message, state = FakeMessage(), FakeState()
     await screen._save(
-        message, state, session, make_settings(), FakeI18n(), "ru", "USDT", 95.0
+        message, state, session, FakeI18n(), "ru", "USDT", 95.0
     )
 
     assert await currency_dal.get_rate(session, "USDT") == 95.0
@@ -250,7 +249,7 @@ async def test_saving_a_rate_values_waiting_payments(session):
 async def test_saving_a_rate_with_nothing_waiting_says_so_quietly(session):
     message, state = FakeMessage(), FakeState()
     await screen._save(
-        message, state, session, make_settings(), FakeI18n(), "ru", "TON", 300.0
+        message, state, session, FakeI18n(), "ru", "TON", 300.0
     )
     assert await currency_dal.get_rate(session, "TON") == 300.0
     # No "previously unvalued payments" line when there were none.
@@ -273,7 +272,7 @@ async def test_editing_a_rate_does_not_touch_valued_payments(session):
 
     message, state = FakeMessage(), FakeState()
     await screen._save(
-        message, state, session, make_settings(), FakeI18n(), "ru", "XTR", 3.0
+        message, state, session, FakeI18n(), "ru", "XTR", 3.0
     )
 
     refreshed = await payment_dal.get_payment_by_db_id(session, payment.payment_id)

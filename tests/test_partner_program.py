@@ -318,16 +318,16 @@ async def test_currency_without_a_rate_is_excluded_not_valued_at_face_value(
     campaign_id = partner_campaign.ad_campaign_id
     await add_user(session, 1)
     await attribute(session, 1, campaign_id, ago_hours=48)
-    unpriced = await add_payment(session, 1, 5.0, ago_hours=1, currency="USDT")
+    unvalued_payment = await add_payment(session, 1, 5.0, ago_hours=1, currency="USDT")
     await add_payment(session, 1, 100.0, ago_hours=1, currency="RUB")
     await session.commit()
 
-    assert unpriced.base_amount is None and unpriced.fx_rate is None
+    assert unvalued_payment.base_amount is None and unvalued_payment.fx_rate is None
 
     stats = await ad_dal.get_partner_stats(session, campaign_id, now=NOW)
     assert stats["revenue"] == 100.0
     assert stats["purchases"]["total"]["count"] == 1
-    assert stats["unpriced"] == 1
+    assert stats["unvalued"] == 1
 
     # The admin adds the rate; the payment is valued and joins the ledger.
     await currency_dal.set_rate(session, "USDT", 95.0, updated_by=7)
@@ -337,7 +337,7 @@ async def test_currency_without_a_rate_is_excluded_not_valued_at_face_value(
 
     stats = await ad_dal.get_partner_stats(session, campaign_id, now=NOW)
     assert stats["revenue"] == 575.0
-    assert stats["unpriced"] == 0
+    assert stats["unvalued"] == 0
 
 
 async def test_empty_campaign_stats_are_zero(session, partner_campaign):
@@ -349,7 +349,7 @@ async def test_empty_campaign_stats_are_zero(session, partner_campaign):
     assert stats["revenue"] == 0.0
     assert stats["accrued"] == 0.0
     assert stats["balance"] == 0.0
-    assert stats["unpriced"] == 0
+    assert stats["unvalued"] == 0
 
 
 async def test_legacy_ad_stats_are_unchanged(session):
@@ -368,7 +368,9 @@ async def test_legacy_ad_stats_are_unchanged(session):
 
     await ad_dal.sync_campaign_accruals(session, campaign.ad_campaign_id)
     stats = await ad_dal.get_campaign_stats(session, campaign.ad_campaign_id)
-    assert stats == {"starts": 2, "trials": 1, "payers": 1, "revenue": 500.0}
+    assert stats == {
+        "starts": 2, "trials": 1, "payers": 1, "revenue": 500.0, "unvalued": 0,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -651,7 +653,9 @@ async def test_only_users_who_registered_through_the_label_are_credited(
     assert stats["accrued"] == 300.0
 
     legacy = await ad_dal.get_campaign_stats(session, campaign_id)
-    assert legacy == {"starts": 1, "trials": 1, "payers": 1, "revenue": 1000.0}
+    assert legacy == {
+        "starts": 1, "trials": 1, "payers": 1, "revenue": 1000.0, "unvalued": 0,
+    }
 
 
 async def test_no_accrual_is_written_for_a_pre_existing_user(session, partner_campaign):
@@ -664,8 +668,8 @@ async def test_no_accrual_is_written_for_a_pre_existing_user(session, partner_ca
     assert await ad_dal.record_accrual_for_payment(session, payment.payment_id) is None
     assert await ad_dal.sync_campaign_accruals(session, campaign_id) == 0
     assert await ad_dal.count_campaign_accruals(session, campaign_id) == 0
-    # Not "unpriced" either — it is simply out of scope for the campaign.
-    assert await ad_dal.count_unpriced_payments(session, campaign_id) == 0
+    # Not "unvalued" either — it is simply out of scope for the campaign.
+    assert await ad_dal.count_unvalued_payments(session, campaign_id) == 0
 
 
 async def test_ensure_attribution_records_the_flag(session, partner_campaign):
