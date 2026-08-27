@@ -273,6 +273,23 @@ class Settings(BaseSettings):
         description="Allow legacy referral links like ref_<telegram_id> to continue working. Defaults to True when unset."
     )
 
+    PARTNER_PROGRAM_ENABLED: bool = Field(
+        default=True,
+        description="Enable partner (affiliate) campaigns and the /partner command",
+    )
+    PARTNER_MIN_PAYOUT: float = Field(
+        default=500.0,
+        description="Minimum partner balance (in PARTNER_PAYOUT_CURRENCY) that can be withdrawn",
+    )
+    PARTNER_PAYOUT_CURRENCY: str = Field(
+        default="RUB",
+        description=(
+            "Base currency every payment is normalised into and partner balances "
+            "are shown in. Conversion rates themselves live in the currency_rates "
+            "table, edited from the admin panel."
+        ),
+    )
+
     PANEL_API_URL: Optional[str] = None
     PANEL_API_KEY: Optional[str] = None
     USER_TRAFFIC_LIMIT_GB: Optional[float] = Field(default=0.0)
@@ -301,6 +318,13 @@ class Settings(BaseSettings):
 
     START_COMMAND_DESCRIPTION: Optional[str] = Field(default=None)
     PROMO_COMMAND_DESCRIPTION: Optional[str] = Field(default=None)
+    PARTNER_COMMAND_DESCRIPTION: Optional[str] = Field(
+        default=None,
+        description=(
+            "Set to publish /partner in the Telegram command menu for everyone. "
+            "Leave unset to keep it a hidden command only partners are told about."
+        ),
+    )
     DISABLE_WELCOME_MESSAGE: bool = Field(default=False, description="Disable welcome message on /start command")
 
     MY_DEVICES_SECTION_ENABLED: bool = Field(

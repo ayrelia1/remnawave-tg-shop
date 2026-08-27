@@ -36,3 +36,12 @@ class AdminStates(StatesGroup):
     waiting_for_ad_source = State()
     waiting_for_ad_start_param = State()
     waiting_for_ad_cost = State()
+
+    # Partner campaigns
+    waiting_for_partner_user_id = State()
+    waiting_for_partner_percent = State()
+    waiting_for_partner_payout_amount = State()
+
+    # Currency rates
+    waiting_for_currency_rate = State()
+    waiting_for_new_currency = State()

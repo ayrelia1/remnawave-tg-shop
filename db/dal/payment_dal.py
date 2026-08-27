@@ -29,6 +29,8 @@ async def create_payment_record(session: AsyncSession,
             )
 
     new_payment = Payment(**payment_data)
+    if new_payment.base_amount is None:
+        await _apply_base_amount(session, new_payment)
     session.add(new_payment)
     await session.flush()
     await session.refresh(new_payment)
@@ -36,6 +38,79 @@ async def create_payment_record(session: AsyncSession,
         f"Payment record {new_payment.payment_id} created for user {new_payment.user_id}"
     )
     return new_payment
+
+
+async def _apply_base_amount(session: AsyncSession, payment: Payment) -> bool:
+    """Freeze the payment's value in the base currency at purchase time.
+
+    Leaves both fields NULL when the currency has no configured rate: a sale
+    must never be blocked by missing bookkeeping config, and an unvalued
+    payment is excluded from money totals rather than counted at face value.
+    """
+    from .currency_dal import get_rate
+
+    rate = await get_rate(session, payment.currency)
+    if rate is None:
+        logging.error(
+            "No conversion rate configured for %s — payment for user %s is recorded "
+            "unvalued and stays out of revenue totals until a rate is added.",
+            payment.currency,
+            payment.user_id,
+        )
+        return False
+
+    payment.fx_rate = float(rate)
+    payment.base_amount = round(float(payment.amount or 0.0) * float(rate), 2)
+    return True
+
+
+async def value_payment_if_needed(session: AsyncSession, payment_db_id: int) -> bool:
+    """Second chance to value a payment: a rate may have been added since."""
+    payment = await get_payment_by_db_id(session, payment_db_id)
+    if payment is None or payment.base_amount is not None:
+        return False
+    applied = await _apply_base_amount(session, payment)
+    if applied:
+        await session.flush()
+    return applied
+
+
+async def count_unvalued_payments(session: AsyncSession) -> int:
+    stmt = select(func.count(Payment.payment_id)).where(
+        and_(Payment.status == "succeeded", Payment.base_amount.is_(None))
+    )
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def revalue_unvalued_payments(session: AsyncSession) -> int:
+    """Value every succeeded payment left unvalued, at the current rates.
+
+    Called after an admin adds a rate. Payments that already carry a value are
+    untouched — this only fills gaps, it never revalues history.
+    """
+    from .currency_dal import get_rates
+
+    rates = await get_rates(session)
+    if not rates:
+        return 0
+
+    stmt = select(Payment).where(
+        and_(
+            Payment.status == "succeeded",
+            Payment.base_amount.is_(None),
+            func.upper(Payment.currency).in_(list(rates)),
+        )
+    )
+    payments = (await session.execute(stmt)).scalars().all()
+    for payment in payments:
+        rate = rates[(payment.currency or "").upper()]
+        payment.fx_rate = float(rate)
+        payment.base_amount = round(float(payment.amount or 0.0) * float(rate), 2)
+
+    if payments:
+        await session.flush()
+        logging.info("Valued %s previously unvalued payment(s).", len(payments))
+    return len(payments)
 
 
 async def get_payment_by_provider_payment_id(
@@ -89,6 +164,26 @@ async def get_payment_by_db_id(session: AsyncSession,
     return result.scalar_one_or_none()
 
 
+async def _record_campaign_accrual(session: AsyncSession, payment_db_id: int) -> None:
+    """Write the campaign ledger row for a payment that just succeeded.
+
+    Statistics must never be able to break payment processing, so every failure
+    here is swallowed and logged: the reader-side `sync_campaign_accruals` will
+    pick the payment up on the next read anyway.
+    """
+    try:
+        from . import ad_dal
+
+        await ad_dal.record_accrual_for_payment(session, payment_db_id)
+    except Exception as e:
+        logging.error(
+            "Failed to record campaign accrual for payment %s: %s",
+            payment_db_id,
+            e,
+            exc_info=True,
+        )
+
+
 async def update_payment_status_by_db_id(
         session: AsyncSession,
         payment_db_id: int,
@@ -105,6 +200,9 @@ async def update_payment_status_by_db_id(
         logging.info(
             f"Payment record {payment.payment_id} status updated to {new_status}."
         )
+        if new_status == "succeeded":
+            await value_payment_if_needed(session, payment.payment_id)
+            await _record_campaign_accrual(session, payment.payment_id)
     else:
         logging.warning(
             f"Payment record with DB ID {payment_db_id} not found for status update."
@@ -205,6 +303,8 @@ async def mark_provider_payment_succeeded_once(
             payment_db_id,
             provider_payment_id,
         )
+        await value_payment_if_needed(session, payment_db_id)
+        await _record_campaign_accrual(session, payment_db_id)
     return updated
 
 
@@ -325,8 +425,9 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
     week_start = today_start - timedelta(days=7)
     month_start = today_start - timedelta(days=30)
     
-    # Today's revenue
-    stmt_today = select(func.sum(Payment.amount)).where(
+    # Revenue figures sum the normalised column, so mixed currencies add up
+    # correctly. Payments whose currency has no rate are NULL here and stay out.
+    stmt_today = select(func.sum(Payment.base_amount)).where(
         and_(
             Payment.status == 'succeeded',
             Payment.created_at >= today_start
@@ -336,7 +437,7 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
     today_amount = today_revenue.scalar() or 0
     
     # Week revenue
-    stmt_week = select(func.sum(Payment.amount)).where(
+    stmt_week = select(func.sum(Payment.base_amount)).where(
         and_(
             Payment.status == 'succeeded',
             Payment.created_at >= week_start
@@ -346,7 +447,7 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
     week_amount = week_revenue.scalar() or 0
     
     # Month revenue
-    stmt_month = select(func.sum(Payment.amount)).where(
+    stmt_month = select(func.sum(Payment.base_amount)).where(
         and_(
             Payment.status == 'succeeded',
             Payment.created_at >= month_start
@@ -356,7 +457,7 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
     month_amount = month_revenue.scalar() or 0
     
     # All time revenue
-    stmt_all = select(func.sum(Payment.amount)).where(Payment.status == 'succeeded')
+    stmt_all = select(func.sum(Payment.base_amount)).where(Payment.status == 'succeeded')
     all_revenue = await session.execute(stmt_all)
     all_amount = all_revenue.scalar() or 0
     
@@ -375,13 +476,14 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
         "week_revenue": float(week_amount),
         "month_revenue": float(month_amount),
         "all_time_revenue": float(all_amount),
-        "today_payments_count": today_payments_count
+        "today_payments_count": today_payments_count,
+        "unvalued_payments": await count_unvalued_payments(session),
     }
 
 
 async def get_user_total_paid(session: AsyncSession, user_id: int) -> float:
-    """Get total amount paid by a specific user (sum of all succeeded payments)."""
-    stmt = select(func.sum(Payment.amount)).where(
+    """Get total amount paid by a specific user, in the base currency."""
+    stmt = select(func.sum(Payment.base_amount)).where(
         and_(
             Payment.user_id == user_id,
             Payment.status == 'succeeded'
@@ -400,7 +502,7 @@ async def get_referral_revenue(session: AsyncSession, referrer_id: int) -> float
     """
     from db.models import User
     
-    stmt = select(func.sum(Payment.amount)).join(
+    stmt = select(func.sum(Payment.base_amount)).join(
         User, Payment.user_id == User.user_id
     ).where(
         and_(

@@ -14,6 +14,7 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_BOOKMARK,
     PREMIUM_EMOJI_CANCEL,
     PREMIUM_EMOJI_CLOCK_PANEL,
+    PREMIUM_EMOJI_COIN,
     PREMIUM_EMOJI_COMPUTER,
     PREMIUM_EMOJI_DELETE,
     PREMIUM_EMOJI_DOCUMENT,
@@ -223,6 +224,11 @@ def get_system_functions_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
         callback_data="admin_action:check_nodes",
         icon_custom_emoji_id=PREMIUM_EMOJI_SEARCH,
     )
+    builder.button(
+        text=_(key="admin_currency_rates_button"),
+        callback_data="admin_action:currency_rates",
+        icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
+    )
 
     builder.button(
         text=_(key="back_to_admin_panel_button"),
@@ -242,11 +248,16 @@ def get_ads_menu_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
         icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
     )
     builder.button(
+        text=_(key="admin_ads_add_payout_button"),
+        callback_data="admin_ads:payout_pick:0",
+        icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+    )
+    builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
         icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
-    builder.adjust(1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -261,12 +272,16 @@ def get_ads_list_keyboard(
     builder = InlineKeyboardBuilder()
 
     for c in campaigns:
+        is_partner = getattr(c, "campaign_type", "ad") == "partner"
         title = f"{c.source}"
+        if is_partner:
+            title = f"{c.source} · {c.partner_percent or 0:g}%"
         builder.button(
             text=title,
             callback_data=f"admin_ads:card:{c.ad_campaign_id}:{current_page}",
-            icon_custom_emoji_id=PREMIUM_EMOJI_TAG,
+            icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL if is_partner else PREMIUM_EMOJI_TAG,
         )
+    builder.adjust(1)
 
     # Pagination row (only when needed)
     if total_pages > 1:
@@ -297,23 +312,72 @@ def get_ads_list_keyboard(
         if row:
             builder.row(*row)
 
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="admin_ads_create_button"),
+            callback_data="admin_action:ads_create",
+            icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="admin_ads_add_payout_button"),
+            callback_data="admin_ads:payout_pick:0",
+            icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="back_to_admin_panel_button"),
+            callback_data="admin_action:main",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
+    return builder.as_markup()
+
+
+def get_ad_campaign_type_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
     builder.button(
-        text=_(key="admin_ads_create_button"),
-        callback_data="admin_action:ads_create",
-        icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
+        text=_(key="admin_ads_type_ad_button"),
+        callback_data="admin_ads:new:ad",
+        icon_custom_emoji_id=PREMIUM_EMOJI_MEGAPHONE,
     )
     builder.button(
-        text=_(key="back_to_admin_panel_button"),
-        callback_data="admin_action:main",
+        text=_(key="admin_ads_type_partner_button"),
+        callback_data="admin_ads:new:partner",
+        icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
+    )
+    builder.button(
+        text=_(key="back_to_ads_list_button"),
+        callback_data="admin_ads:page:0",
         icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
     return builder.as_markup()
 
 
-def get_ad_card_keyboard(i18n_instance, lang: str, campaign_id: int, back_page: int) -> InlineKeyboardMarkup:
+def get_ad_card_keyboard(
+    i18n_instance,
+    lang: str,
+    campaign_id: int,
+    back_page: int,
+    is_partner: bool = False,
+) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
+    if is_partner:
+        builder.button(
+            text=_(key="admin_ads_add_payout_button"),
+            callback_data=f"admin_ads:payout_start:{campaign_id}:{back_page}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+        )
+        builder.button(
+            text=_(key="admin_ads_payouts_button"),
+            callback_data=f"admin_ads:payouts:{campaign_id}:{back_page}:0",
+            icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
+        )
     # Dangerous action: Delete campaign
     builder.button(
         text=_(key="admin_ads_delete_button"),
@@ -331,6 +395,118 @@ def get_ad_card_keyboard(i18n_instance, lang: str, campaign_id: int, back_page: 
         icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_partner_pick_keyboard(
+    i18n_instance,
+    lang: str,
+    campaigns: list,
+    current_page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    """Partner campaign picker for the "add payout" flow."""
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    for c in campaigns:
+        builder.button(
+            text=f"{c.source} · {c.partner_percent or 0:g}% · {c.partner_user_id}",
+            callback_data=f"admin_ads:payout_start:{c.ad_campaign_id}:0",
+            icon_custom_emoji_id=PREMIUM_EMOJI_REFERRAL,
+        )
+    builder.adjust(1)
+
+    if total_pages > 1:
+        row = []
+        if current_page > 0:
+            row.append(
+                InlineKeyboardButton(
+                    text=_("prev_page_button"),
+                    callback_data=f"admin_ads:payout_pick:{current_page - 1}",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+                )
+            )
+        row.append(
+            InlineKeyboardButton(
+                text=f"{current_page + 1}/{total_pages}",
+                callback_data="ads_page_display",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NUMBERS,
+            )
+        )
+        if current_page < total_pages - 1:
+            row.append(
+                InlineKeyboardButton(
+                    text=_("next_page_button"),
+                    callback_data=f"admin_ads:payout_pick:{current_page + 1}",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
+                )
+            )
+        builder.row(*row)
+
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="back_to_ads_list_button"),
+            callback_data="admin_ads:page:0",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
+    return builder.as_markup()
+
+
+def get_admin_payouts_keyboard(
+    i18n_instance,
+    lang: str,
+    campaign_id: int,
+    back_page: int,
+    payouts: list,
+    current_page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    for p in payouts:
+        date_text = p.created_at.strftime("%d.%m.%Y") if p.created_at else "—"
+        builder.button(
+            text=f"{date_text} · {p.amount:.2f} {p.currency}",
+            callback_data=f"admin_ads:payout_del:{campaign_id}:{back_page}:{p.payout_id}:{current_page}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_DELETE,
+        )
+    builder.adjust(1)
+
+    if total_pages > 1:
+        row = []
+        if current_page > 0:
+            row.append(
+                InlineKeyboardButton(
+                    text=_("prev_page_button"),
+                    callback_data=f"admin_ads:payouts:{campaign_id}:{back_page}:{current_page - 1}",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+                )
+            )
+        row.append(
+            InlineKeyboardButton(
+                text=f"{current_page + 1}/{total_pages}",
+                callback_data="ads_page_display",
+                icon_custom_emoji_id=PREMIUM_EMOJI_NUMBERS,
+            )
+        )
+        if current_page < total_pages - 1:
+            row.append(
+                InlineKeyboardButton(
+                    text=_("next_page_button"),
+                    callback_data=f"admin_ads:payouts:{campaign_id}:{back_page}:{current_page + 1}",
+                    icon_custom_emoji_id=PREMIUM_EMOJI_NEXT,
+                )
+            )
+        builder.row(*row)
+
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="back_to_ad_card_button"),
+            callback_data=f"admin_ads:card:{campaign_id}:{back_page}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
     return builder.as_markup()
 
 
@@ -663,4 +839,47 @@ def get_back_to_admin_panel_keyboard(lang: str,
         callback_data="admin_action:main",
         icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
+    return builder.as_markup()
+
+
+def get_currency_rates_keyboard(
+    i18n_instance, lang: str, rates: list
+) -> InlineKeyboardMarkup:
+    """One row per configured currency, plus the add/back actions."""
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    for row in rates:
+        builder.button(
+            text=f"{row.currency} = {row.rate:g}",
+            callback_data=f"admin_rates:edit:{row.currency}",
+            icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
+        )
+    builder.adjust(1)
+
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="admin_currency_rate_add_button"),
+            callback_data="admin_rates:add",
+            icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=_(key="back_to_admin_panel_button"),
+            callback_data="admin_section:system_functions",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
+    return builder.as_markup()
+
+
+def get_currency_rate_cancel_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=_(key="cancel_button"),
+        callback_data="admin_action:currency_rates",
+        icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
+    )
+    builder.adjust(1)
     return builder.as_markup()

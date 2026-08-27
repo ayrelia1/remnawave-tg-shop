@@ -47,10 +47,10 @@ POST /webhook/telegram → Aiogram dispatcher → Middlewares → Router → Han
 | `config/settings.py` | Pydantic BaseSettings — all config with computed properties |
 | `bot/main_bot.py` | Startup/shutdown, webhook registration |
 | `bot/routers.py` | Aggregates all routers; admin handlers behind `AdminFilter(ADMIN_IDS)` |
-| `bot/handlers/user/` | User-facing: start, subscription views, payment flows, referral, trial, promo |
-| `bot/handlers/admin/` | Admin panel: stats, user management, broadcast, sync, logs |
+| `bot/handlers/user/` | User-facing: start, subscription views, payment flows, referral, trial, promo, partner cabinet |
+| `bot/handlers/admin/` | Admin panel: stats, user management, broadcast, sync, logs, ad/partner campaigns |
 | `bot/services/` | Business logic layer (subscription, panel API, payments, referral, promo, notifications) |
-| `db/models.py` | SQLAlchemy ORM: User, Subscription, Payment, UserBilling, UserPaymentMethod, PromoCode, PromoCodeActivation, ActiveDiscount, MessageLog, PanelSyncStatus, AdCampaign, AdAttribution |
+| `db/models.py` | SQLAlchemy ORM: User, Subscription, Payment, UserBilling, UserPaymentMethod, PromoCode, PromoCodeActivation, ActiveDiscount, MessageLog, PanelSyncStatus, AdCampaign, AdAttribution, CampaignAccrual, PartnerPayout, CurrencyRate |
 | `db/dal/` | Data Access Layer — one module per entity |
 | `bot/middlewares/` | DB session, i18n, ban check, channel gate, action logger, profile sync |
 | `bot/app/` | Dispatcher factory, service factory, aiohttp web server |
@@ -69,11 +69,24 @@ POST /webhook/telegram → Aiogram dispatcher → Middlewares → Router → Han
 
 **i18n**: Call `i18n.gettext(lang, key, **kwargs)` where `lang` comes from middleware. Translation keys are in `locales/ru.json` and `locales/en.json`. The `DEFAULT_LANGUAGE` setting is the fallback.
 
-**Premium emoji in copy**: locale strings may contain `::name::` tokens (e.g. `::bolt::`, `::lock::`, `::calendar::`). `JsonI18n._load_locales` expands them once at startup into `<tg-emoji emoji-id="…">glyph</tg-emoji>` using `TEXT_EMOJI` in `bot/constants/premium_emoji.py` — the same id registry that feeds `icon_custom_emoji_id` on inline buttons, so a pack swap is still a one-file change. Expansion happens *before* `str.format`, so tokens never collide with `{placeholders}`; unknown tokens are left in place and logged. `PREMIUM_EMOJI_ENABLED=false` degrades every token to its bare unicode glyph — set it when the bot has no Fragment username, since Telegram rejects custom emoji entities from such bots. **Tokens are only valid in strings sent with `parse_mode=HTML`.** Button labels (`*_button`) and `callback.answer(..., show_alert=True)` texts are plain text and must stay on bare unicode.
+**Premium emoji in copy**: locale strings may contain `::name::` tokens (e.g. `::bolt::`, `::lock::`, `::calendar::`). `JsonI18n._load_locales` expands them once at startup into `<tg-emoji emoji-id="…">glyph</tg-emoji>` using `TEXT_EMOJI` in `bot/constants/premium_emoji.py` — the same id registry that feeds `icon_custom_emoji_id` on inline buttons, so a pack swap is still a one-file change. Expansion happens *before* `str.format`, so tokens never collide with `{placeholders}`; unknown tokens are left in place and logged. `PREMIUM_EMOJI_ENABLED=false` degrades every token to its bare unicode glyph — set it when the bot has no Fragment username, since Telegram rejects custom emoji entities from such bots. **Tokens are only valid in strings sent with `parse_mode=HTML`.** Button labels (`*_button`) and `callback.answer(..., show_alert=True)` texts are plain text and must stay on bare unicode. Button labels additionally carry **no glyph at all** — the icon comes from `icon_custom_emoji_id` on the button itself, so an emoji in the label renders *next to* the premium icon instead of being it. `tests/test_partner_keyboards.py` enforces this over every `*_button` string.
 
 **Admin access**: Handlers under `bot/handlers/admin/` are automatically gated by `AdminFilter` in `bot/routers.py`. Add new admin routers to the `admin_router_aggregate` there.
 
 **Subscription tiers**: When `DEVICE_PLANS_ENABLED=true` the bot sells device-based tiers (e.g. 5/10/15 devices), each with its own per-duration price matrix (`DEVICE_PLANS_RUB` / `DEVICE_PLANS_STARS`, parsed in `config/settings.py`). The purchased tier is stored on `Subscription.hwid_device_limit` / `Payment.hwid_device_limit` and pushed to the panel as `hwidDeviceLimit`. Buying a *different* tier while a sub is active is a "tariff switch": remaining days are converted value-preservingly by price ratio (`tier_monthly_rate`) in `subscription_service.activate_subscription`, mirrored by `compute_switch_preview` for the pre-payment warning. Upgrade/downgrade switches are gated by `TARIFF_SWITCH_UPGRADE_ENABLED` / `TARIFF_SWITCH_DOWNGRADE_ENABLED` (`is_switch_allowed`). Trial/bonus/legacy subs have `hwid_device_limit=NULL` and stack time instead of switching. When device plans are off, `device_limit` stays `None` and the panel keeps its global limit.
+
+**Money is normalised on the payment, once.** Every `payments` row carries `base_amount` and the `fx_rate` that produced it, frozen when the payment is created — `payment_dal.create_payment_record` is the single chokepoint every provider goes through, and the two success transitions fill it in later if the rate was missing at the time. Rates live in `currency_rates`, edited from the admin panel (Системные функции → Курсы валют); `PARTNER_CURRENCY_RATES` in .env is read *only* by migration 0007 to seed that table. Because the value is stored, every money total — `get_financial_statistics`, `get_user_total_paid`, `get_referral_revenue`, campaign revenue — is a `SUM(base_amount)` and they cannot disagree with each other. Editing a rate never revalues anything: it applies to payments made afterwards, plus payments that were never valued at all.
+
+A currency with no configured rate leaves `base_amount`/`fx_rate` NULL rather than defaulting to 1.0 — counting 5 USDT as 5 RUB is the exact bug this design removes. The sale still goes through; the payment simply stays out of every total and is surfaced by `count_unvalued_payments` (global) and `ad_dal.count_unpriced_payments` (per campaign). Adding the rate and calling `payment_dal.revalue_unvalued_payments` fills the gap, which the admin rates screen does automatically on save.
+
+**Ad labels & partner programs**: `ad_campaigns` rows carry a `campaign_type` — `"ad"` (traffic we bought; `cost` is the spend) or `"partner"` (an affiliate label bound to `partner_user_id` earning `partner_percent` of the revenue it brings). A `/start <start_param>` writes one `ad_attributions` row per user, **first-touch and permanent**: `ensure_attribution` returns the existing row whatever campaign is passed, and `user_id` is the PK, so a user can never be re-attributed.
+
+`campaign_accruals` is the campaign-side ledger: one immutable row per attributed payment, written when the payment reaches `succeeded` (hooked inside `payment_dal.mark_provider_payment_succeeded_once` and `update_payment_status_by_db_id`). It does **no currency math** — `base_amount` is copied from the payment. What it adds is the campaign side of the deal: the `percent` in force at that moment and the resulting `earned_amount`, so a later percent change cannot rewrite history either. `payment_id` is `UNIQUE`, which is what stops a replayed webhook double-crediting a partner, and `ON DELETE SET NULL`, so purging a customer keeps the money record. `sync_campaign_accruals` is the completeness net readers call first: it materialises rows for eligible payments that have none yet (idempotent, skips still-unvalued payments).
+
+Payouts (`partner_payouts`, admin-recorded, cascade-deleted with the campaign) are normalised the same way at entry, so `balance = SUM(earned_amount) - SUM(payouts.base_amount)`. `PARTNER_MIN_PAYOUT` is display-only — withdrawals go through support. Partners open their cabinet with `/partner`; every callback re-checks `campaign.partner_user_id == from_user.id` via `_owned_campaign`. Deleting a partner user detaches and deactivates the label instead of removing it.
+
+Out of the box only Stars are non-RUB: YooKassa/FreeKassa/Platega/SeverPay write `RUB`, Heleket hardcodes `RUB` (`HELEKET_TO_CURRENCY` only picks the coin Heleket settles in, it never reaches the ledger), and CryptoPay writes `CRYPTOPAY_ASSET`, which is `RUB` under the default `CRYPTOPAY_CURRENCY_TYPE=fiat`.
+
 
 ## Payment Providers
 
@@ -107,7 +120,11 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-`tests/` covers the panel API contract (routes and payloads), the HTTP envelope handling, webhook event mapping, and the panel-reference relinking. Everything is stubbed — no network, no database. `tests/conftest.py` provides `RecordingPanelApiService`, which records `(method, endpoint, kwargs)` per call and replays scripted responses.
+`tests/` covers the panel API contract (routes and payloads), the HTTP envelope handling, webhook event mapping, and the panel-reference relinking. The panel tests are fully stubbed — no network — and `tests/conftest.py` provides `RecordingPanelApiService`, which records `(method, endpoint, kwargs)` per call and replays scripted responses.
+
+The money tests are the exception: `test_partner_program.py` runs the DAL against in-memory SQLite (`aiosqlite`) with the real models, so the arithmetic is exercised as SQL — payment normalisation, windowed aggregates, rate/percent freezing, webhook replay, and the unvalued-currency path. `test_partner_keyboards.py` checks callback/handler coverage, the 64-byte callback limit, one-row-per-entry layout, that button labels carry no glyph, and that every `_( "key", ...)` call matches its locale template in both languages. `test_migrations.py` guards the single Alembic head, migration/model column parity across revisions, and the backfill invariants.
+
+Postgres-specific behaviour is not covered by pytest — verify it against a throwaway `postgres:17-alpine` container when touching migrations. The check that matters: upgrade a populated database from 0004 to head and confirm every money figure (financial statistics, user LTV, referral revenue, per-campaign revenue) is byte-identical before and after, since existing payments are valued 1:1.
 
 ## Database Migrations
 

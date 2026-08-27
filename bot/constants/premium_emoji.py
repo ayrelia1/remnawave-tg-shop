@@ -152,6 +152,7 @@ TEXT_EMOJI: Dict[str, Tuple[str, str]] = {
     "stop": (PREMIUM_EMOJI_BAN, "⛔️"),
     # objects
     "laptop": (PREMIUM_EMOJI_COMPUTER, "💻"),
+    "package": (PREMIUM_EMOJI_PACKAGE, "📦"),
     "chain": (PREMIUM_EMOJI_CONNECT, "⛓️"),
     "doc": (PREMIUM_EMOJI_DOCUMENT, "📄"),
     "chart": (PREMIUM_EMOJI_STATS, "📈"),

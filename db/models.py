@@ -110,6 +110,12 @@ class Payment(Base):
     discount_applied = Column(Float, nullable=True)  # Discount amount (not percentage)
 
     currency = Column(String, nullable=False)
+    # Value of `amount` in the base currency (PARTNER_PAYOUT_CURRENCY), frozen
+    # with the rate that produced it at the moment of purchase. NULL means the
+    # currency had no configured rate yet — such a payment is left out of every
+    # money total rather than counted at face value.
+    base_amount = Column(Float, nullable=True)
+    fx_rate = Column(Float, nullable=True)
     status = Column(String, nullable=False, index=True)
     description = Column(String, nullable=True)
     subscription_duration_months = Column(Integer, nullable=True)
@@ -276,6 +282,10 @@ class PanelSyncStatus(Base):
     __table_args__ = (UniqueConstraint('id'), )
 
 
+CAMPAIGN_TYPE_AD = "ad"
+CAMPAIGN_TYPE_PARTNER = "partner"
+
+
 class AdCampaign(Base):
     __tablename__ = "ad_campaigns"
 
@@ -286,14 +296,46 @@ class AdCampaign(Base):
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # "ad" - paid traffic we bought ourselves (cost is what we spent).
+    # "partner" - affiliate label owned by partner_user_id, who earns
+    # partner_percent of the revenue their users generate.
+    campaign_type = Column(
+        String(16),
+        nullable=False,
+        server_default=CAMPAIGN_TYPE_AD,
+        default=CAMPAIGN_TYPE_AD,
+        index=True,
+    )
+    partner_user_id = Column(
+        BigInteger, ForeignKey("users.user_id"), nullable=True, index=True
+    )
+    # Immutable once set: accrued earnings are recomputed from payments on
+    # every read, so changing it would rewrite the partner's history.
+    partner_percent = Column(Float, nullable=True)
+
     attributions = relationship(
         "AdAttribution",
         back_populates="campaign",
         cascade="all, delete-orphan",
     )
+    partner_user = relationship("User", foreign_keys=[partner_user_id])
+    payouts = relationship(
+        "PartnerPayout",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+    )
+    accruals = relationship(
+        "CampaignAccrual",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def is_partner(self) -> bool:
+        return self.campaign_type == CAMPAIGN_TYPE_PARTNER
 
     def __repr__(self):
-        return f"<AdCampaign(id={self.ad_campaign_id}, source='{self.source}', start_param='{self.start_param}', cost={self.cost})>"
+        return f"<AdCampaign(id={self.ad_campaign_id}, type='{self.campaign_type}', source='{self.source}', start_param='{self.start_param}', cost={self.cost})>"
 
 
 class AdAttribution(Base):
@@ -306,3 +348,114 @@ class AdAttribution(Base):
 
     user = relationship("User")
     campaign = relationship("AdCampaign", back_populates="attributions")
+
+
+class PartnerPayout(Base):
+    __tablename__ = "partner_payouts"
+
+    payout_id = Column(Integer, primary_key=True, autoincrement=True)
+    ad_campaign_id = Column(
+        Integer,
+        ForeignKey("ad_campaigns.ad_campaign_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    amount = Column(Float, nullable=False)
+    currency = Column(String, nullable=False, default="RUB")
+    # Rate applied when the payout was recorded, and the resulting base-currency
+    # value. Frozen for the same reason accruals are: a later rate change must
+    # not silently rewrite what a partner was already paid.
+    fx_rate = Column(Float, nullable=False, default=1.0)
+    base_amount = Column(Float, nullable=False, default=0.0)
+    comment = Column(String, nullable=True)
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    campaign = relationship("AdCampaign", back_populates="payouts")
+
+    def __repr__(self):
+        return (
+            f"<PartnerPayout(id={self.payout_id}, campaign={self.ad_campaign_id}, "
+            f"amount={self.amount} {self.currency} -> {self.base_amount})>"
+        )
+
+
+class CampaignAccrual(Base):
+    """One row per attributed payment — the campaign revenue ledger.
+
+    Written once, when a payment reaches "succeeded" (or when a reader notices
+    an eligible payment without a row yet), and never recomputed. It does no
+    currency math: `base_amount` is copied from the payment, which was
+    normalised at purchase time. What the ledger adds is the campaign side of
+    the deal — the partner share in force at that moment and the resulting
+    `earned_amount` — so a later percent change cannot rewrite history.
+    """
+
+    __tablename__ = "campaign_accruals"
+
+    accrual_id = Column(Integer, primary_key=True, autoincrement=True)
+    ad_campaign_id = Column(
+        Integer,
+        ForeignKey("ad_campaigns.ad_campaign_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Unique: a payment can never be accrued twice. Nulled rather than deleted
+    # when a user is purged, so the money history outlives the customer record.
+    payment_id = Column(
+        Integer,
+        ForeignKey("payments.payment_id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    # Snapshot, deliberately without a FK for the same reason.
+    user_id = Column(BigInteger, nullable=False, index=True)
+
+    amount = Column(Float, nullable=False)
+    currency = Column(String, nullable=False)
+    # Copied from the payment, which is where the conversion happens. Kept here
+    # rather than joined so the ledger survives a purged payment and so that
+    # campaign totals are a single-table SUM.
+    base_amount = Column(Float, nullable=False)
+
+    percent = Column(Float, nullable=False, default=0.0)
+    earned_amount = Column(Float, nullable=False, default=0.0)
+
+    provider = Column(String, nullable=True)
+    subscription_duration_months = Column(Integer, nullable=True)
+    hwid_device_limit = Column(Integer, nullable=True)
+
+    # Snapshot of payments.created_at — the moment the invoice was created,
+    # which is the timestamp campaign windows have always been measured on.
+    paid_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    campaign = relationship("AdCampaign", back_populates="accruals")
+
+    def __repr__(self):
+        return (
+            f"<CampaignAccrual(id={self.accrual_id}, campaign={self.ad_campaign_id}, "
+            f"payment={self.payment_id}, {self.amount} {self.currency} -> {self.base_amount}, "
+            f"earned={self.earned_amount})>"
+        )
+
+
+class CurrencyRate(Base):
+    """Admin-managed conversion rates into the base currency.
+
+    The database is the source of truth: PARTNER_CURRENCY_RATES only seeds this
+    table on first migration. A currency absent here has no rate, and payments
+    in it stay unvalued (`payments.base_amount IS NULL`) until an admin adds
+    one — deliberately, so nothing is ever counted at face value.
+    """
+
+    __tablename__ = "currency_rates"
+
+    currency = Column(String(16), primary_key=True)
+    rate = Column(Float, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(BigInteger, nullable=True)
+
+    def __repr__(self):
+        return f"<CurrencyRate({self.currency}={self.rate})>"

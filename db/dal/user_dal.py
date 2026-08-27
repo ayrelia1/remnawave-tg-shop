@@ -18,6 +18,7 @@ from ..models import (
     UserBilling,
     UserPaymentMethod,
     AdAttribution,
+    AdCampaign,
 )
 
 REFERRAL_CODE_ALPHABET = string.ascii_uppercase + string.digits
@@ -419,6 +420,14 @@ async def delete_user_and_relations(session: AsyncSession, user_id: int) -> bool
     )
     await session.execute(delete(UserBilling).where(UserBilling.user_id == user_id))
     await session.execute(delete(AdAttribution).where(AdAttribution.user_id == user_id))
+
+    # Partner campaigns outlive their owner: keep the label (and its revenue
+    # history) but detach and deactivate it so nobody can open it via /partner.
+    await session.execute(
+        update(AdCampaign)
+        .where(AdCampaign.partner_user_id == user_id)
+        .values(partner_user_id=None, is_active=False)
+    )
 
     await session.delete(user)
     await session.flush()
