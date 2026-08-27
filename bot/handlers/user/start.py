@@ -459,6 +459,9 @@ async def start_command_handler(message: types.Message,
     sanitized_last_name = sanitize_display_name(user.last_name)
 
     db_user = await user_dal.get_user_by_id(session, user_id)
+    # Whether this /start is also the user's registration — the only case a
+    # campaign is credited for bringing them.
+    registered_now = db_user is None
     if not db_user:
         user_data_to_create = {
             "user_id": user_id,
@@ -471,6 +474,7 @@ async def start_command_handler(message: types.Message,
         }
         try:
             db_user, created = await user_dal.create_user(session, user_data_to_create)
+            registered_now = bool(created)
 
             if created:
                 try:
@@ -546,7 +550,12 @@ async def start_command_handler(message: types.Message,
             from db.dal import ad_dal as _ad_dal
             campaign = await _ad_dal.get_campaign_by_start_param(session, ad_start_param)
             if campaign and campaign.is_active:
-                await _ad_dal.ensure_attribution(session, user_id=user_id, campaign_id=campaign.ad_campaign_id)
+                await _ad_dal.ensure_attribution(
+                    session,
+                    user_id=user_id,
+                    campaign_id=campaign.ad_campaign_id,
+                    is_new_user=registered_now,
+                )
                 await session.commit()
         except Exception as e_attr:
             logging.error(f"Failed to attribute user {user_id} to ad '{ad_start_param}': {e_attr}")

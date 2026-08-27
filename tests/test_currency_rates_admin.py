@@ -133,10 +133,71 @@ async def test_render_lists_configured_rates(session):
 
     assert "admin_currency_rates_header" in text
     labels = [b.text for row in markup.inline_keyboard for b in row]
-    assert "RUB = 1" in labels and "XTR = 1" in labels
+    # The base currency is listed but marked, and it is not an edit button.
+    assert "RUB = 1 (admin_currency_base_label)" in labels
+    assert "XTR = 1" in labels
     assert "admin_currency_rate_add_button" in labels
     # Nothing unvalued yet, so no warning.
     assert "admin_currency_rates_unvalued" not in text
+
+
+def _callbacks(markup):
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
+
+
+async def test_base_currency_row_is_not_editable(session):
+    _text, markup = await screen._render(session, make_settings(), FakeI18n(), "ru")
+    data = _callbacks(markup)
+    assert "admin_rates:base" in data
+    assert "admin_rates:edit:RUB" not in data
+    assert "admin_rates:edit:XTR" in data
+
+
+async def test_setting_the_base_currency_rate_is_refused(session):
+    with pytest.raises(ValueError) as exc:
+        await currency_dal.set_rate(session, "RUB", 2.0, base_currency="RUB")
+    assert str(exc.value) == "currency_rate_base_is_fixed"
+    assert await currency_dal.get_rate(session, "RUB") == 1.0
+
+    # Writing the identity back is harmless and allowed.
+    await currency_dal.set_rate(session, "rub", 1.0, base_currency="RUB")
+    assert await currency_dal.get_rate(session, "RUB") == 1.0
+
+
+async def test_deleting_the_base_currency_rate_is_refused(session):
+    with pytest.raises(ValueError) as exc:
+        await currency_dal.delete_rate(session, "RUB", base_currency="RUB")
+    assert str(exc.value) == "currency_rate_base_is_fixed"
+    assert await currency_dal.get_rate(session, "RUB") == 1.0
+
+
+async def test_save_path_refuses_the_base_currency(session):
+    message, state = FakeMessage(), FakeState()
+    await screen._save(
+        message, state, session, make_settings(), FakeI18n(), "ru", "RUB", 2.0
+    )
+    assert message.answers == ["admin_currency_base_locked"]
+    assert await currency_dal.get_rate(session, "RUB") == 1.0
+    assert state.cleared is False
+
+
+async def test_base_rate_self_heals_if_tampered_with(session):
+    """A row edited straight in the database is forced back to the identity."""
+    row = await session.get(CurrencyRate, "RUB")
+    row.rate = 7.0
+    await session.flush()
+
+    await currency_dal.ensure_base_rate(session, "RUB")
+    assert await currency_dal.get_rate(session, "RUB") == 1.0
+
+
+async def test_base_rate_is_created_when_missing(session):
+    await session.delete(await session.get(CurrencyRate, "RUB"))
+    await session.flush()
+    assert await currency_dal.get_rate(session, "RUB") is None
+
+    await currency_dal.ensure_base_rate(session, "RUB")
+    assert await currency_dal.get_rate(session, "RUB") == 1.0
 
 
 async def test_render_warns_about_unvalued_payments(session):

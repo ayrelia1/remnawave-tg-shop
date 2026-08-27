@@ -57,7 +57,9 @@ async def _render(session: AsyncSession, settings: Settings, i18n: JsonI18n, lan
 
     from bot.keyboards.inline.admin_keyboards import get_currency_rates_keyboard
 
-    return text, get_currency_rates_keyboard(i18n, lang, rates)
+    return text, get_currency_rates_keyboard(
+        i18n, lang, rates, settings.PARTNER_PAYOUT_CURRENCY
+    )
 
 
 async def _safe_edit(callback: types.CallbackQuery, text: str, markup) -> None:
@@ -81,9 +83,23 @@ async def show_rates(
         return
 
     await state.clear()
+    # Self-heal: the base currency must always be present at exactly 1.0.
+    await currency_dal.ensure_base_rate(session, settings.PARTNER_PAYOUT_CURRENCY)
     text, markup = await _render(session, settings, i18n, current_lang)
     await _safe_edit(callback, text, markup)
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin_rates:base")
+async def base_currency_is_locked(
+    callback: types.CallbackQuery, settings: Settings, i18n_data: dict
+):
+    current_lang, i18n = _lang_and_i18n(settings, i18n_data)
+    _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
+    await callback.answer(
+        _("admin_currency_base_locked", currency=settings.PARTNER_PAYOUT_CURRENCY),
+        show_alert=True,
+    )
 
 
 @router.callback_query(F.data.startswith("admin_rates:edit:"))
@@ -103,6 +119,11 @@ async def prompt_edit(
     code = currency_dal.normalize(callback.data.split(":", 2)[2])
     if not CURRENCY_RE.match(code):
         await callback.answer(_("admin_currency_rate_invalid_code"), show_alert=True)
+        return
+    if code == currency_dal.normalize(settings.PARTNER_PAYOUT_CURRENCY):
+        await callback.answer(
+            _("admin_currency_base_locked", currency=code), show_alert=True
+        )
         return
 
     current = await currency_dal.get_rate(session, code)
@@ -162,14 +183,24 @@ async def _save(
     _ = lambda key, **kwargs: i18n.gettext(lang, key, **kwargs)
     try:
         await currency_dal.set_rate(
-            session, code, rate, updated_by=message.from_user.id
+            session,
+            code,
+            rate,
+            base_currency=settings.PARTNER_PAYOUT_CURRENCY,
+            updated_by=message.from_user.id,
         )
         # A rate may unlock payments that could not be valued before.
         valued = await payment_dal.revalue_unvalued_payments(session)
         await session.commit()
-    except ValueError:
-        await session.rollback()
-        await message.answer(_("admin_currency_rate_invalid_value"))
+    except ValueError as ve:
+        # Validation happens before anything is written, so there is nothing to
+        # roll back — and rolling back here would discard unrelated pending work.
+        if str(ve) == "currency_rate_base_is_fixed":
+            await message.answer(
+                _("admin_currency_base_locked", currency=code), parse_mode="HTML"
+            )
+        else:
+            await message.answer(_("admin_currency_rate_invalid_value"))
         return
     except Exception as e:
         await session.rollback()

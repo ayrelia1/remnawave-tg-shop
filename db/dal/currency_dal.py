@@ -47,13 +47,23 @@ async def set_rate(
     currency: str,
     rate: float,
     *,
+    base_currency: Optional[str] = None,
     updated_by: Optional[int] = None,
 ) -> CurrencyRate:
+    """Write a rate, refusing anything that would break the base currency.
+
+    Every other rate is expressed *in* the base currency, so its own rate is an
+    identity — 1.0 by definition. Setting it to anything else would silently
+    rescale every future payment in it, which is why this is refused here rather
+    than only in the UI.
+    """
     code = normalize(currency)
     if not code:
         raise ValueError("currency_rate_invalid_code")
     if rate is None or float(rate) <= 0:
         raise ValueError("currency_rate_invalid_rate")
+    if base_currency and code == normalize(base_currency) and float(rate) != 1.0:
+        raise ValueError("currency_rate_base_is_fixed")
 
     existing = await session.get(CurrencyRate, code)
     if existing:
@@ -70,9 +80,30 @@ async def set_rate(
     return row
 
 
-async def delete_rate(session: AsyncSession, currency: str) -> bool:
+async def delete_rate(
+    session: AsyncSession, currency: str, *, base_currency: Optional[str] = None
+) -> bool:
     code = normalize(currency)
+    if base_currency and code == normalize(base_currency):
+        raise ValueError("currency_rate_base_is_fixed")
     result = await session.execute(
         delete(CurrencyRate).where(CurrencyRate.currency == code)
     )
     return (result.rowcount or 0) > 0
+
+
+async def ensure_base_rate(session: AsyncSession, base_currency: str) -> CurrencyRate:
+    """Guarantee the base currency exists at exactly 1.0."""
+    code = normalize(base_currency)
+    row = await session.get(CurrencyRate, code)
+    if row is None:
+        row = CurrencyRate(currency=code, rate=1.0)
+        session.add(row)
+        await session.flush()
+    elif float(row.rate) != 1.0:
+        logging.error(
+            "Base currency %s had rate %s; forcing it back to 1.0.", code, row.rate
+        )
+        row.rate = 1.0
+        await session.flush()
+    return row

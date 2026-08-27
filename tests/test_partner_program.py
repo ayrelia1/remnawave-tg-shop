@@ -58,12 +58,21 @@ async def add_user(session, user_id: int, username: str = None) -> User:
     return user
 
 
-async def attribute(session, user_id: int, campaign_id: int, *, ago_hours: float = 1000, trial: bool = False):
+async def attribute(
+    session,
+    user_id: int,
+    campaign_id: int,
+    *,
+    ago_hours: float = 1000,
+    trial: bool = False,
+    is_new_user: bool = True,
+):
     attribution = AdAttribution(
         user_id=user_id,
         ad_campaign_id=campaign_id,
         first_start_at=NOW - timedelta(hours=ago_hours),
         trial_activated_at=NOW - timedelta(hours=ago_hours - 1) if trial else None,
+        is_new_user=is_new_user,
     )
     session.add(attribution)
     await session.flush()
@@ -616,6 +625,80 @@ async def test_owned_campaign_guard(session, partner_campaign):
 # --------------------------------------------------------------------------- #
 # Attribution & user lifecycle
 # --------------------------------------------------------------------------- #
+
+
+async def test_only_users_who_registered_through_the_label_are_credited(
+    session, partner_campaign
+):
+    """An already-registered user clicking the link must not inflate the label."""
+    campaign_id = partner_campaign.ad_campaign_id
+
+    await add_user(session, 1)
+    await attribute(session, 1, campaign_id, ago_hours=48, trial=True, is_new_user=True)
+    await add_payment(session, 1, 1000.0, ago_hours=2)
+
+    # Same label, but this one was already a user before clicking.
+    await add_user(session, 2)
+    await attribute(session, 2, campaign_id, ago_hours=48, trial=True, is_new_user=False)
+    await add_payment(session, 2, 5000.0, ago_hours=2)
+    await session.commit()
+
+    stats = await ad_dal.get_partner_stats(session, campaign_id, now=NOW)
+    assert stats["starts"]["total"] == 1
+    assert stats["trials"] == 1
+    assert stats["payers"] == 1
+    assert stats["revenue"] == 1000.0
+    assert stats["accrued"] == 300.0
+
+    legacy = await ad_dal.get_campaign_stats(session, campaign_id)
+    assert legacy == {"starts": 1, "trials": 1, "payers": 1, "revenue": 1000.0}
+
+
+async def test_no_accrual_is_written_for_a_pre_existing_user(session, partner_campaign):
+    campaign_id = partner_campaign.ad_campaign_id
+    await add_user(session, 2)
+    await attribute(session, 2, campaign_id, ago_hours=48, is_new_user=False)
+    payment = await add_payment(session, 2, 500.0, ago_hours=1)
+    await session.commit()
+
+    assert await ad_dal.record_accrual_for_payment(session, payment.payment_id) is None
+    assert await ad_dal.sync_campaign_accruals(session, campaign_id) == 0
+    assert await ad_dal.count_campaign_accruals(session, campaign_id) == 0
+    # Not "unpriced" either — it is simply out of scope for the campaign.
+    assert await ad_dal.count_unpriced_payments(session, campaign_id) == 0
+
+
+async def test_ensure_attribution_records_the_flag(session, partner_campaign):
+    await add_user(session, 1)
+    await add_user(session, 2)
+
+    fresh = await ad_dal.ensure_attribution(
+        session, user_id=1, campaign_id=partner_campaign.ad_campaign_id, is_new_user=True
+    )
+    existing = await ad_dal.ensure_attribution(
+        session, user_id=2, campaign_id=partner_campaign.ad_campaign_id
+    )
+    await session.commit()
+
+    assert fresh.is_new_user is True
+    # Defaults to False: crediting a campaign has to be an explicit decision.
+    assert existing.is_new_user is False
+
+
+async def test_the_flag_is_not_changed_by_a_later_click(session, partner_campaign):
+    other = await ad_dal.create_campaign(session, source="o", start_param="o1")
+    await add_user(session, 1)
+
+    first = await ad_dal.ensure_attribution(
+        session, user_id=1, campaign_id=partner_campaign.ad_campaign_id, is_new_user=False
+    )
+    second = await ad_dal.ensure_attribution(
+        session, user_id=1, campaign_id=other.ad_campaign_id, is_new_user=True
+    )
+    await session.commit()
+
+    assert second is first
+    assert first.is_new_user is False
 
 
 async def test_attribution_stays_with_the_first_campaign(session, partner_campaign):

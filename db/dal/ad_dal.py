@@ -96,15 +96,35 @@ async def toggle_campaign_active(session: AsyncSession, campaign_id: int, is_act
     return result.rowcount > 0
 
 
-async def ensure_attribution(session: AsyncSession, *, user_id: int, campaign_id: int) -> AdAttribution:
+async def ensure_attribution(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    campaign_id: int,
+    is_new_user: bool = False,
+) -> AdAttribution:
+    """Record the first-touch label for a user.
+
+    `is_new_user` must be True only when this /start is also the user's
+    registration. Campaign statistics count those rows exclusively, so an
+    already-registered user clicking a link is stored for reference but never
+    credited to the campaign.
+    """
     existing = await get_attribution_for_user(session, user_id)
     if existing:
         return existing
-    attrib = AdAttribution(user_id=user_id, ad_campaign_id=campaign_id)
+    attrib = AdAttribution(
+        user_id=user_id, ad_campaign_id=campaign_id, is_new_user=bool(is_new_user)
+    )
     session.add(attrib)
     await session.flush()
     await session.refresh(attrib)
-    logging.info(f"AdAttribution created for user {user_id} -> campaign {campaign_id}")
+    logging.info(
+        "AdAttribution created for user %s -> campaign %s (new_user=%s)",
+        user_id,
+        campaign_id,
+        bool(is_new_user),
+    )
     return attrib
 
 
@@ -129,6 +149,14 @@ async def mark_trial_activated(session: AsyncSession, user_id: int) -> bool:
 # --------------------------------------------------------------------------- #
 
 
+def _campaign_users(campaign_id: int):
+    """Users a campaign is credited for: attributed *and* registered through it."""
+    return and_(
+        AdAttribution.ad_campaign_id == campaign_id,
+        AdAttribution.is_new_user.is_(True),
+    )
+
+
 def _eligible_payments_stmt(campaign_id: Optional[int] = None):
     """Succeeded payments of attributed users, made after they were attributed."""
     stmt = (
@@ -136,6 +164,7 @@ def _eligible_payments_stmt(campaign_id: Optional[int] = None):
         .join(AdAttribution, AdAttribution.user_id == Payment.user_id)
         .where(
             and_(
+                AdAttribution.is_new_user.is_(True),
                 Payment.status == "succeeded",
                 Payment.created_at >= AdAttribution.first_start_at,
             )
@@ -194,7 +223,7 @@ async def record_accrual_for_payment(
         return None
 
     attribution = await get_attribution_for_user(session, payment.user_id)
-    if attribution is None:
+    if attribution is None or not attribution.is_new_user:
         return None
     if (
         payment.created_at is not None
@@ -275,7 +304,7 @@ async def count_unpriced_payments(session: AsyncSession, campaign_id: int) -> in
         .join(AdAttribution, AdAttribution.user_id == Payment.user_id)
         .where(
             and_(
-                AdAttribution.ad_campaign_id == campaign_id,
+                _campaign_users(campaign_id),
                 Payment.status == "succeeded",
                 Payment.created_at >= AdAttribution.first_start_at,
                 Payment.base_amount.is_(None),
@@ -297,13 +326,13 @@ def _window_cutoffs(now: Optional[datetime] = None) -> Dict[str, datetime]:
 
 async def get_campaign_stats(session: AsyncSession, campaign_id: int) -> Dict[str, Any]:
     starts_stmt = select(func.count(AdAttribution.user_id)).where(
-        AdAttribution.ad_campaign_id == campaign_id
+        _campaign_users(campaign_id)
     )
     starts = (await session.execute(starts_stmt)).scalar() or 0
 
     trials_stmt = select(func.count(AdAttribution.user_id)).where(
         and_(
-            AdAttribution.ad_campaign_id == campaign_id,
+            _campaign_users(campaign_id),
             AdAttribution.trial_activated_at.is_not(None),
         )
     )
@@ -437,7 +466,7 @@ async def _starts_breakdown(
         )
         for name in WINDOW_HOURS
     )
-    stmt = select(*columns).where(AdAttribution.ad_campaign_id == campaign_id)
+    stmt = select(*columns).where(_campaign_users(campaign_id))
     row = (await session.execute(stmt)).one()
     result = {"total": int(row[0] or 0)}
     for idx, name in enumerate(WINDOW_HOURS, start=1):
@@ -513,7 +542,7 @@ async def get_partner_stats(
 
     trials_stmt = select(func.count(AdAttribution.user_id)).where(
         and_(
-            AdAttribution.ad_campaign_id == campaign_id,
+            _campaign_users(campaign_id),
             AdAttribution.trial_activated_at.is_not(None),
         )
     )

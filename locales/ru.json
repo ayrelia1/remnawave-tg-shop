@@ -623,5 +623,7 @@
   "admin_currency_rate_invalid_code": "Некорректный код валюты.",
   "admin_currency_rate_invalid_value": "Некорректный курс. Введите положительное число.",
   "admin_currency_rate_saved": "✅ Курс сохранён: <b>1 {currency} = {rate} {base}</b>",
-  "admin_currency_rate_valued": "Учтено ранее неоценённых платежей: <b>{count}</b>"
+  "admin_currency_rate_valued": "Учтено ранее неоценённых платежей: <b>{count}</b>",
+  "admin_currency_base_label": "база",
+  "admin_currency_base_locked": "{currency} — базовая валюта: все остальные курсы измеряются в ней, поэтому её курс всегда 1. Изменить нельзя."
 }

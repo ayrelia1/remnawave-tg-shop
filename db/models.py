@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger
 from sqlalchemy.orm import relationship, DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs
-from sqlalchemy.sql import func
+from sqlalchemy.sql import expression, func
 from datetime import datetime
 
 
@@ -345,6 +345,13 @@ class AdAttribution(Base):
     ad_campaign_id = Column(Integer, ForeignKey("ad_campaigns.ad_campaign_id"), nullable=False, index=True)
     first_start_at = Column(DateTime(timezone=True), server_default=func.now())
     trial_activated_at = Column(DateTime(timezone=True), nullable=True)
+    # True only when the user registered *through* this label — i.e. their very
+    # first /start carried it. Someone who was already a user before clicking is
+    # still recorded here, but flagged False and excluded from every campaign
+    # figure: the label did not bring them, so it must not be credited for them.
+    is_new_user = Column(
+        Boolean, nullable=False, server_default=expression.false(), default=False
+    )
 
     user = relationship("User")
     campaign = relationship("AdCampaign", back_populates="attributions")

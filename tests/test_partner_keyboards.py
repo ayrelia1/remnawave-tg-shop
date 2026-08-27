@@ -383,3 +383,28 @@ def test_currency_rates_screen_is_wired_into_the_admin_dispatcher():
     actions = _dispatched_actions(*DISPATCHERS["admin_action"])
     assert "currency_rates" in actions
     assert "ads" in actions
+
+def test_start_handler_credits_a_campaign_only_on_registration():
+    """`/start <label>` must pass whether this visit is also the registration."""
+    source = io.open(REPO_ROOT / "bot/handlers/user/start.py", encoding="utf-8").read()
+    tree = ast.parse(source, "start.py")
+
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "ensure_attribution"
+    ]
+    assert calls, "the start handler no longer attributes users"
+
+    for call in calls:
+        passed = {kw.arg: kw.value for kw in call.keywords}
+        assert "is_new_user" in passed, "attribution must state whether the user is new"
+        value = passed["is_new_user"]
+        # Never a bare True: it has to come from the registration check.
+        assert isinstance(value, ast.Name), ast.dump(value)
+        assert value.id == "registered_now"
+
+    assert "registered_now = db_user is None" in source
+    assert "registered_now = bool(created)" in source

@@ -22,6 +22,7 @@ from alembic.config import Config  # noqa: E402
 from alembic.script import ScriptDirectory  # noqa: E402
 
 from db.models import (  # noqa: E402
+    AdAttribution,
     AdCampaign,
     CampaignAccrual,
     CurrencyRate,
@@ -30,7 +31,7 @@ from db.models import (  # noqa: E402
 )
 
 MIGRATIONS = REPO_ROOT / "alembic" / "versions"
-HEAD = "0007_payment_base_amount"
+HEAD = "0008_attribution_is_new_user"
 
 
 @pytest.fixture(scope="module")
@@ -203,6 +204,38 @@ def test_rate_seed_also_covers_every_currency_already_in_payments():
     source = inspect.getsource(module._insert_seed_rates)
     assert "SELECT DISTINCT UPPER(currency), 1.0 FROM payments" in source
     assert "ON CONFLICT (currency) DO NOTHING" in source
+
+
+def test_is_new_user_column_matches_the_model():
+    module = _load("0008_attribution_is_new_user")
+    captured = {}
+
+    def fake_add_column(table, column):
+        captured[column.name] = (table, column)
+
+    with patch.object(module, "op", SimpleNamespace(add_column=fake_add_column)):
+        module._add_column()
+
+    table, column = captured["is_new_user"]
+    assert table == "ad_attributions"
+    model_column = AdAttribution.__table__.columns["is_new_user"]
+    assert type(column.type) is type(model_column.type)
+    # Not nullable, defaulting to False: a campaign is credited only on purpose.
+    assert column.nullable is False and model_column.nullable is False
+
+
+def test_is_new_user_backfill_uses_the_registration_timestamp():
+    module = _load("0008_attribution_is_new_user")
+
+    assert "UPDATE ad_attributions" in module.BACKFILL_SQL
+    assert "u.registration_date" in module.BACKFILL_SQL
+    assert "a.first_start_at" in module.BACKFILL_SQL
+    assert str(module.REGISTRATION_WINDOW_SECONDS) in module.BACKFILL_SQL
+
+    # Ledger rows for users the campaign is no longer credited for are dropped.
+    assert "DELETE FROM campaign_accruals" in module.PRUNE_ACCRUALS_SQL
+    assert "a.is_new_user = FALSE" in module.PRUNE_ACCRUALS_SQL
+    assert "a.ad_campaign_id = ca.ad_campaign_id" in module.PRUNE_ACCRUALS_SQL
 
 
 def test_campaign_type_backfills_existing_rows_as_ad():

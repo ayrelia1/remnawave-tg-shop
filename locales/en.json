@@ -622,5 +622,7 @@
   "admin_currency_rate_invalid_code": "Invalid currency code.",
   "admin_currency_rate_invalid_value": "Invalid rate. Enter a positive number.",
   "admin_currency_rate_saved": "✅ Rate saved: <b>1 {currency} = {rate} {base}</b>",
-  "admin_currency_rate_valued": "Previously unvalued payments now counted: <b>{count}</b>"
+  "admin_currency_rate_valued": "Previously unvalued payments now counted: <b>{count}</b>",
+  "admin_currency_base_label": "base",
+  "admin_currency_base_locked": "{currency} is the base currency: every other rate is measured in it, so its own rate is always 1. It cannot be changed."
 }

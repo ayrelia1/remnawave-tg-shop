@@ -843,15 +843,21 @@ def get_back_to_admin_panel_keyboard(lang: str,
 
 
 def get_currency_rates_keyboard(
-    i18n_instance, lang: str, rates: list
+    i18n_instance, lang: str, rates: list, base_currency: str = "RUB"
 ) -> InlineKeyboardMarkup:
-    """One row per configured currency, plus the add/back actions."""
+    """One row per configured currency, plus the add/back actions.
+
+    The base currency is listed but not editable: everything else is measured
+    in it, so its rate is 1.0 by definition.
+    """
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
+    base = (base_currency or "").upper()
     for row in rates:
+        is_base = row.currency.upper() == base
         builder.button(
-            text=f"{row.currency} = {row.rate:g}",
-            callback_data=f"admin_rates:edit:{row.currency}",
+            text=f"{row.currency} = {row.rate:g}" + (f" ({_('admin_currency_base_label')})" if is_base else ""),
+            callback_data="admin_rates:base" if is_base else f"admin_rates:edit:{row.currency}",
             icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
         )
     builder.adjust(1)
