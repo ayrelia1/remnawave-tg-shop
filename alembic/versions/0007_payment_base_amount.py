@@ -49,8 +49,9 @@ RENAMES = (
 
 def _seed_rates() -> dict:
     """Base currency at 1.0, plus whatever PARTNER_CURRENCY_RATES carried."""
-    base = (os.getenv("PARTNER_PAYOUT_CURRENCY") or "RUB").strip().upper() or "RUB"
-    rates = {base: 1.0, "XTR": 1.0}
+    from config.currency import BASE_CURRENCY
+
+    rates = {BASE_CURRENCY.upper(): 1.0, "XTR": 1.0}
     raw = (os.getenv("PARTNER_CURRENCY_RATES") or "").strip()
     for chunk in raw.split(","):
         chunk = chunk.strip()

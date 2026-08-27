@@ -279,15 +279,7 @@ class Settings(BaseSettings):
     )
     PARTNER_MIN_PAYOUT: float = Field(
         default=500.0,
-        description="Minimum partner balance (in PARTNER_PAYOUT_CURRENCY) that can be withdrawn",
-    )
-    PARTNER_PAYOUT_CURRENCY: str = Field(
-        default="RUB",
-        description=(
-            "Base currency every payment is normalised into and partner balances "
-            "are shown in. Conversion rates themselves live in the currency_rates "
-            "table, edited from the admin panel."
-        ),
+        description="Minimum partner balance (in the base currency) that can be withdrawn",
     )
 
     PANEL_API_URL: Optional[str] = None

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
 from config.settings import Settings, get_settings
+from config.currency import BASE_CURRENCY
 from db.dal import user_dal, subscription_dal, message_log_dal
 from db.models import User
 from bot.states.admin_states import AdminStates
@@ -335,11 +336,11 @@ async def format_user_card(user: User, session: AsyncSession,
             
             # Total amount paid by this user
             total_paid = await payment_dal.get_user_total_paid(session, user.user_id)
-            card_parts.append(f"{_('admin_user_total_paid_label')} {hcode(f'{total_paid:.2f} RUB')}")
+            card_parts.append(f"{_('admin_user_total_paid_label')} {hcode(f'{total_paid:.2f} {BASE_CURRENCY}')}")
             
             # Total revenue from referrals
             referral_revenue = await payment_dal.get_referral_revenue(session, user.user_id)
-            card_parts.append(f"{_('admin_user_referral_revenue_label')} {hcode(f'{referral_revenue:.2f} RUB')}")
+            card_parts.append(f"{_('admin_user_referral_revenue_label')} {hcode(f'{referral_revenue:.2f} {BASE_CURRENCY}')}")
         except Exception as e_fin:
             logging.error(f"Failed to build financial analytics for admin card {user.user_id}: {e_fin}")
 

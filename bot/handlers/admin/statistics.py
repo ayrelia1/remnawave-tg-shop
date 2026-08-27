@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
+from config.currency import BASE_CURRENCY
 
 from db.dal import user_dal, payment_dal, panel_sync_dal
 from db.models import Payment, PanelSyncStatus
@@ -162,16 +163,16 @@ async def show_statistics_handler(callback: types.CallbackQuery,
         f"\n<b>💰 {_('admin_financial_stats_header')}</b>"
     )
     stats_text_parts.append(
-        f"📅 {_('admin_financial_today_label')}: <b>{financial_stats['today_revenue']:.2f} RUB</b> ({financial_stats['today_payments_count']} {_('admin_financial_payments_label')})"
+        f"📅 {_('admin_financial_today_label')}: <b>{financial_stats['today_revenue']:.2f} {BASE_CURRENCY}</b> ({financial_stats['today_payments_count']} {_('admin_financial_payments_label')})"
     )
     stats_text_parts.append(
-        f"📅 {_('admin_financial_week_label')}: <b>{financial_stats['week_revenue']:.2f} RUB</b>"
+        f"📅 {_('admin_financial_week_label')}: <b>{financial_stats['week_revenue']:.2f} {BASE_CURRENCY}</b>"
     )
     stats_text_parts.append(
-        f"📅 {_('admin_financial_month_label')}: <b>{financial_stats['month_revenue']:.2f} RUB</b>"
+        f"📅 {_('admin_financial_month_label')}: <b>{financial_stats['month_revenue']:.2f} {BASE_CURRENCY}</b>"
     )
     stats_text_parts.append(
-        f"🏆 {_('admin_financial_all_time_label')}: <b>{financial_stats['all_time_revenue']:.2f} RUB</b>"
+        f"🏆 {_('admin_financial_all_time_label')}: <b>{financial_stats['all_time_revenue']:.2f} {BASE_CURRENCY}</b>"
     )
 
     last_payments_models: List[

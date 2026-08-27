@@ -408,3 +408,53 @@ def test_start_handler_credits_a_campaign_only_on_registration():
 
     assert "registered_now = db_user is None" in source
     assert "registered_now = bool(created)" in source
+
+
+# The bug this guards against is an amount *labelled* with a literal code.
+# A code inside help text ("for example: USDT 95") is fine and stays.
+LABELLED_AMOUNT_RE = re.compile(r"\{[a-z_]+\}[^<]{0,6}\b(RUB|USD|EUR|XTR|USDT|TON)\b")
+
+
+def test_no_locale_string_labels_an_amount_with_a_literal_currency(locales):
+    """The unit of an amount comes from BASE_CURRENCY, never from a literal.
+
+    A hardcoded code silently lies the moment the base currency differs from it,
+    and that is exactly the drift this whole normalisation exists to prevent.
+    """
+    offenders = {
+        key: value
+        for table in locales
+        for key, value in table.items()
+        if isinstance(value, str) and LABELLED_AMOUNT_RE.search(value)
+    }
+    assert offenders == {}
+
+
+def test_the_guard_would_actually_catch_a_regression():
+    """A test that cannot fail is worse than no test — prove this one can."""
+    assert LABELLED_AMOUNT_RE.search("Доход: <b>{revenue} RUB</b>")
+    assert LABELLED_AMOUNT_RE.search("Total: {amount} USD")
+    # ...while the legitimate shapes stay clean.
+    assert not LABELLED_AMOUNT_RE.search("Доход: <b>{revenue} {currency}</b>")
+    assert not LABELLED_AMOUNT_RE.search("Например: <code>USDT 95</code>")
+
+
+def test_reporting_screens_render_the_base_currency():
+    """Grep-level guard: no money label in a reporting screen is a literal."""
+    from config.currency import BASE_CURRENCY
+
+    reporting = (
+        "bot/handlers/admin/statistics.py",
+        "bot/handlers/admin/user_management.py",
+        "bot/handlers/inline_mode.py",
+        "bot/handlers/admin/ads.py",
+        "bot/handlers/user/partner.py",
+        "bot/handlers/admin/currency_rates.py",
+    )
+    for path in reporting:
+        source = io.open(REPO_ROOT / path, encoding="utf-8").read()
+        assert 'from config.currency import BASE_CURRENCY' in source, path
+        # No amount is ever followed by a written-out currency code.
+        assert not re.search(r":\.2f\}\s+(RUB|USD|EUR)\b", source), path
+
+    assert BASE_CURRENCY == "RUB"

@@ -16,6 +16,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
+from config.currency import BASE_CURRENCY
 from bot.middlewares.i18n import JsonI18n
 from bot.states.admin_states import AdminStates
 from db.dal import currency_dal, payment_dal
@@ -49,7 +50,7 @@ async def _render(session: AsyncSession, settings: Settings, i18n: JsonI18n, lan
     rates = await currency_dal.list_rates(session)
     unvalued = await payment_dal.count_unvalued_payments(session)
 
-    text = _("admin_currency_rates_header", base=settings.PARTNER_PAYOUT_CURRENCY)
+    text = _("admin_currency_rates_header", base=BASE_CURRENCY)
     if not rates:
         text += "\n\n" + _("admin_currency_rates_empty")
     if unvalued:
@@ -58,7 +59,7 @@ async def _render(session: AsyncSession, settings: Settings, i18n: JsonI18n, lan
     from bot.keyboards.inline.admin_keyboards import get_currency_rates_keyboard
 
     return text, get_currency_rates_keyboard(
-        i18n, lang, rates, settings.PARTNER_PAYOUT_CURRENCY
+        i18n, lang, rates, BASE_CURRENCY
     )
 
 
@@ -84,7 +85,7 @@ async def show_rates(
 
     await state.clear()
     # Self-heal: the base currency must always be present at exactly 1.0.
-    await currency_dal.ensure_base_rate(session, settings.PARTNER_PAYOUT_CURRENCY)
+    await currency_dal.ensure_base_rate(session, BASE_CURRENCY)
     text, markup = await _render(session, settings, i18n, current_lang)
     await _safe_edit(callback, text, markup)
     await callback.answer()
@@ -97,7 +98,7 @@ async def base_currency_is_locked(
     current_lang, i18n = _lang_and_i18n(settings, i18n_data)
     _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs) if i18n else key
     await callback.answer(
-        _("admin_currency_base_locked", currency=settings.PARTNER_PAYOUT_CURRENCY),
+        _("admin_currency_base_locked", currency=BASE_CURRENCY),
         show_alert=True,
     )
 
@@ -120,7 +121,7 @@ async def prompt_edit(
     if not CURRENCY_RE.match(code):
         await callback.answer(_("admin_currency_rate_invalid_code"), show_alert=True)
         return
-    if code == currency_dal.normalize(settings.PARTNER_PAYOUT_CURRENCY):
+    if code == currency_dal.normalize(BASE_CURRENCY):
         await callback.answer(
             _("admin_currency_base_locked", currency=code), show_alert=True
         )
@@ -137,7 +138,7 @@ async def prompt_edit(
         _(
             "admin_currency_rate_prompt",
             currency=code,
-            base=settings.PARTNER_PAYOUT_CURRENCY,
+            base=BASE_CURRENCY,
             current=f"{current:g}" if current is not None else "—",
         ),
         get_currency_rate_cancel_keyboard(i18n, current_lang),
@@ -164,7 +165,7 @@ async def prompt_add(
 
     await _safe_edit(
         callback,
-        _("admin_currency_rate_add_prompt", base=settings.PARTNER_PAYOUT_CURRENCY),
+        _("admin_currency_rate_add_prompt", base=BASE_CURRENCY),
         get_currency_rate_cancel_keyboard(i18n, current_lang),
     )
     await callback.answer()
@@ -186,7 +187,7 @@ async def _save(
             session,
             code,
             rate,
-            base_currency=settings.PARTNER_PAYOUT_CURRENCY,
+            base_currency=BASE_CURRENCY,
             updated_by=message.from_user.id,
         )
         # A rate may unlock payments that could not be valued before.
@@ -213,7 +214,7 @@ async def _save(
         "admin_currency_rate_saved",
         currency=code,
         rate=f"{rate:g}",
-        base=settings.PARTNER_PAYOUT_CURRENCY,
+        base=BASE_CURRENCY,
     )
     if valued:
         text += "\n" + _("admin_currency_rate_valued", count=valued)

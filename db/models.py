@@ -110,7 +110,7 @@ class Payment(Base):
     discount_applied = Column(Float, nullable=True)  # Discount amount (not percentage)
 
     currency = Column(String, nullable=False)
-    # Value of `amount` in the base currency (PARTNER_PAYOUT_CURRENCY), frozen
+    # Value of `amount` in the base currency (config.currency.BASE_CURRENCY), frozen
     # with the rate that produced it at the moment of purchase. NULL means the
     # currency had no configured rate yet — such a payment is left out of every
     # money total rather than counted at face value.

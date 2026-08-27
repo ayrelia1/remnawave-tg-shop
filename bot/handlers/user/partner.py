@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
+from config.currency import BASE_CURRENCY
 from bot.middlewares.i18n import JsonI18n
 from db.dal import ad_dal, user_dal
 from db.models import AdCampaign, CampaignAccrual, PartnerPayout
@@ -90,7 +91,7 @@ async def _build_card(
     stats = await ad_dal.get_partner_stats(
         session, campaign.ad_campaign_id
     )
-    currency = settings.PARTNER_PAYOUT_CURRENCY
+    currency = BASE_CURRENCY
     purchases = stats["purchases"]
     starts = stats["starts"]
 
@@ -371,7 +372,7 @@ async def partner_sale_detail(
         date=accrual.paid_at.strftime("%d.%m.%Y %H:%M") if accrual.paid_at else "—",
         percent=f"{accrual.percent:g}",
         earned=f"{accrual.earned_amount:.2f}",
-        currency=settings.PARTNER_PAYOUT_CURRENCY,
+        currency=BASE_CURRENCY,
     )
 
     await _send_or_edit(
@@ -424,7 +425,7 @@ async def partner_payouts_callback(
         source=_esc(campaign.source),
         count=total,
         paid_out=f"{paid_out:.2f}",
-        currency=settings.PARTNER_PAYOUT_CURRENCY,
+        currency=BASE_CURRENCY,
     )
     if total == 0:
         text += "\n\n" + _("partner_payouts_empty")

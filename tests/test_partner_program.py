@@ -954,8 +954,18 @@ def make_settings(**overrides):
 def test_partner_defaults():
     settings = make_settings()
     assert settings.PARTNER_MIN_PAYOUT == 500.0
-    assert settings.PARTNER_PAYOUT_CURRENCY == "RUB"
     assert settings.PARTNER_PROGRAM_ENABLED is True
+
+
+def test_base_currency_is_a_constant_not_a_setting():
+    """One definition, deliberately not configurable per deployment."""
+    from config.currency import BASE_CURRENCY
+    from config.settings import Settings
+
+    assert BASE_CURRENCY == "RUB"
+    # Nothing may reintroduce it as an env-tunable knob.
+    assert not any("PAYOUT_CURRENCY" in name for name in Settings.model_fields)
+    assert not any("BASE_CURRENCY" in name for name in Settings.model_fields)
 
 
 async def test_stars_are_accrued_one_to_one_at_the_shipped_rate(session, partner_campaign):

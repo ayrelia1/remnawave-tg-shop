@@ -5,6 +5,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
+from config.currency import BASE_CURRENCY
 from db.dal import user_dal, payment_dal
 from bot.services.referral_service import ReferralService
 from bot.middlewares.i18n import JsonI18n
@@ -208,7 +209,8 @@ async def create_financial_stats_result(session: AsyncSession, i18n_instance, la
             today_count=financial_stats['today_payments_count'],
             week=financial_stats['week_revenue'],
             month=financial_stats['month_revenue'],
-            all_time=financial_stats['all_time_revenue']
+            all_time=financial_stats['all_time_revenue'],
+            currency=BASE_CURRENCY,
         )
         
         return InlineQueryResultArticle(
@@ -218,7 +220,8 @@ async def create_financial_stats_result(session: AsyncSession, i18n_instance, la
             ),
             description=_(
                 "inline_financial_description",
-                today=f"{financial_stats['today_revenue']:.2f}"
+                today=f"{financial_stats['today_revenue']:.2f}",
+                currency=BASE_CURRENCY,
             ),
             input_message_content=InputTextMessageContent(
                 message_text=stats_text,

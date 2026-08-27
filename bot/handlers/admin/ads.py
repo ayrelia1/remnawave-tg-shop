@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
+from config.currency import BASE_CURRENCY
 from bot.middlewares.i18n import JsonI18n
 from db.dal import ad_dal, currency_dal, user_dal
 from db.models import AdCampaign, CAMPAIGN_TYPE_AD, CAMPAIGN_TYPE_PARTNER
@@ -52,6 +53,7 @@ async def _overview_text(session: AsyncSession, settings: Settings, _) -> str:
         revenue=f"{totals.get('revenue', 0.0):.2f}",
         cost=f"{totals.get('cost', 0.0):.2f}",
         payouts=f"{totals.get('payouts', 0.0):.2f}",
+        currency=BASE_CURRENCY,
     )
 
 
@@ -119,7 +121,7 @@ async def _render_campaign_card(
             accrued=f"{stats['accrued']:.2f}",
             paid_out=f"{stats['paid_out']:.2f}",
             balance=f"{stats['balance']:.2f}",
-            currency=settings.PARTNER_PAYOUT_CURRENCY,
+            currency=BASE_CURRENCY,
         )
         if stats["unpriced"]:
             text += "\n\n" + _("admin_ads_unpriced_warning", count=stats["unpriced"])
@@ -140,6 +142,7 @@ async def _render_campaign_card(
             trials=stats["trials"],
             payers=stats["payers"],
             revenue=f"{stats['revenue']:.2f}",
+            currency=BASE_CURRENCY,
         )
         if unpriced:
             text += "\n\n" + _("admin_ads_unpriced_warning", count=unpriced)
@@ -402,7 +405,9 @@ async def ads_create_flow(message: types.Message, state: FSMContext, settings: S
             await message.answer(_("admin_ads_create_partner_user_prompt"))
         else:
             await state.set_state(AdminStates.waiting_for_ad_cost)
-            await message.answer(_("admin_ads_create_cost_prompt"))
+            await message.answer(
+                _("admin_ads_create_cost_prompt", currency=BASE_CURRENCY)
+            )
         return
 
     if current_state == AdminStates.waiting_for_partner_user_id.state:
@@ -514,6 +519,7 @@ async def _finish_campaign_creation(
             start_param=_esc(campaign.start_param),
             cost=f"{campaign.cost:.2f}",
             link=link,
+            currency=BASE_CURRENCY,
         )
     await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
 
@@ -599,7 +605,7 @@ async def ads_payout_start(callback: types.CallbackQuery, state: FSMContext, set
             "admin_ads_payout_amount_prompt",
             source=_esc(campaign.source),
             balance=f"{stats['balance']:.2f}",
-            currency=settings.PARTNER_PAYOUT_CURRENCY,
+            currency=BASE_CURRENCY,
         ),
         None,
     )
@@ -633,7 +639,7 @@ async def ads_payout_amount(message: types.Message, state: FSMContext, settings:
         await message.answer(_("admin_ads_payout_invalid_amount"))
         return
 
-    currency = (match.group(2) or settings.PARTNER_PAYOUT_CURRENCY).upper()
+    currency = (match.group(2) or BASE_CURRENCY).upper()
     if await currency_dal.get_rate(session, currency) is None:
         await message.answer(_("admin_ads_payout_unknown_currency", currency=currency))
         return
@@ -684,7 +690,7 @@ async def ads_payout_save(callback: types.CallbackQuery, state: FSMContext, sett
 
     data = await state.get_data()
     amount = data.get("payout_amount")
-    currency = data.get("payout_currency", settings.PARTNER_PAYOUT_CURRENCY)
+    currency = data.get("payout_currency", BASE_CURRENCY)
     if data.get("payout_campaign_id") != camp_id or not amount:
         await state.clear()
         await callback.answer(_("error_try_again"), show_alert=True)
@@ -756,7 +762,7 @@ async def _render_payouts(
         source=_esc(campaign.source),
         count=total,
         paid_out=f"{paid_out:.2f}",
-        currency=settings.PARTNER_PAYOUT_CURRENCY,
+        currency=BASE_CURRENCY,
     )
     if total == 0:
         text += "\n\n" + _("admin_ads_payouts_empty")
