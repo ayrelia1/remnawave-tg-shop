@@ -533,8 +533,10 @@ def get_yk_saved_cards_keyboard(
     return builder.as_markup()
 
 
-def get_referral_link_keyboard(lang: str,
-                               i18n_instance) -> InlineKeyboardMarkup:
+def get_referral_link_keyboard(
+        lang: str,
+        i18n_instance,
+        partner_support_link: Optional[str] = None) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -542,6 +544,12 @@ def get_referral_link_keyboard(lang: str,
         callback_data="referral_action:share_message",
         icon_custom_emoji_id=PREMIUM_EMOJI_MEGAPHONE,
     )
+    if partner_support_link:
+        builder.button(
+            text=_(key="referral_become_partner_button"),
+            url=partner_support_link,
+            icon_custom_emoji_id=PREMIUM_EMOJI_SUPPORT,
+        )
     builder.button(
         text=_(key="back_to_main_menu_button"),
         callback_data="main_action:back_to_main",

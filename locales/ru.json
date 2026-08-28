@@ -114,6 +114,8 @@
   "referral_bonus_per_period": "\n{months} мес. → вам <b>{inviter_bonus_days} дн.</b>, другу <b>{referee_bonus_days} дн.</b>",
   "referral_not_available_for_traffic": "::info:: За пакеты трафика реферальные бонусы не начисляются.",
   "referral_share_message_button": "Сообщение для друга",
+  "referral_partner_promo": "\n\n::money:: <b>Хотите больше, чем бонусные дни?</b>\nСтаньте нашим партнёром и получайте до <b>50%</b> с оплат приведённых клиентов — деньгами, а не днями.\n\n::chat:: Чтобы подключить партнёрскую программу, напишите в поддержку.",
+  "referral_become_partner_button": "Стать партнёром",
   "referral_friend_message": "🚀 Привет! Попробуй этот VPN - быстрый, надёжный и доступный!\n\n🎁 По моей ссылке тебе дадут бонусные дни к подписке!\n\n{referral_link}",
   "friend_placeholder": "друг",
   "referral_bonus_inviter_notification_extended": "::clap:: <b>{referee_name}</b> оплатил подписку\n\n::calendar:: Вам начислено <b>{days} дн.</b> — подписка активна до <b>{new_end_date}</b>",

@@ -114,8 +114,16 @@ async def referral_command_handler(event: Union[types.Message,
              invited_count=referral_stats["invited_count"],
              purchased_count=referral_stats["purchased_count"])
 
+    # The pitch names support as the way in, so it is only shown when there is
+    # a support link to actually write to.
+    partner_support_link = (settings.SUPPORT_LINK
+                            if settings.PARTNER_PROGRAM_ENABLED else None)
+    if partner_support_link:
+        text += _("referral_partner_promo")
+
     from bot.keyboards.inline.user_keyboards import get_referral_link_keyboard
-    reply_markup_val = get_referral_link_keyboard(current_lang, i18n)
+    reply_markup_val = get_referral_link_keyboard(current_lang, i18n,
+                                                  partner_support_link)
 
     target_msg = event.message if isinstance(event, types.CallbackQuery) else event
     if target_msg:

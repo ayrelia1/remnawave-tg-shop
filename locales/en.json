@@ -113,6 +113,8 @@
   "referral_bonus_per_period": "\n{months} mo. → you <b>{inviter_bonus_days} days</b>, friend <b>{referee_bonus_days} days</b>",
   "referral_not_available_for_traffic": "::info:: Referral bonuses don't apply to traffic packages.",
   "referral_share_message_button": "Message for friend",
+  "referral_partner_promo": "\n\n::money:: <b>Want more than bonus days?</b>\nBecome our partner and earn up to <b>50%</b> of what the clients you bring pay — in money, not days.\n\n::chat:: Message support to set up your partner program.",
+  "referral_become_partner_button": "Become a partner",
   "referral_friend_message": "🚀 Hey! Try this VPN - it's fast, reliable and affordable!\n\n🎁 Use my link to get bonus days with your subscription!\n\n{referral_link}",
   "friend_placeholder": "friend",
   "referral_bonus_inviter_notification_extended": "::clap:: <b>{referee_name}</b> paid for a subscription\n\n::calendar:: You got <b>{days} days</b> — active until <b>{new_end_date}</b>",
