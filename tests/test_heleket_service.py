@@ -1,13 +1,12 @@
 """Heleket gateway: signing, invoice creation and webhook handling.
 
-The signature is the whole security boundary here, so it is pinned against the
-algorithm the docs specify in PHP:
+The signature is the whole security boundary here, so outgoing requests are
+pinned against the algorithm the docs specify in PHP:
 
     md5(base64_encode(json_encode($data, JSON_UNESCAPED_UNICODE)) . $apiKey)
 
-PHP renders JSON compactly and escapes forward slashes; Python does neither by
-default, so `_canonical_json` is asserted literally rather than just
-round-tripped through our own code.
+Incoming webhook tests use raw bytes because decoding and re-encoding a signed
+body is lossy.
 """
 
 import base64
@@ -84,7 +83,7 @@ class _FakeRequest:
     def __init__(self, body):
         self._body = body
 
-    async def json(self):
+    async def read(self):
         return self._body
 
 
@@ -136,15 +135,25 @@ def _service(settings=None, subscription_service=None):
     )
 
 
-def _php_sign(payload, key=API_KEY):
-    """Independent reimplementation of the documented PHP snippet."""
-    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("/", "\\/")
+def _sign_text(body, key=API_KEY):
     return hashlib.md5(
-        (base64.b64encode(encoded.encode("utf-8")).decode("ascii") + key).encode("utf-8")
+        (base64.b64encode(body.encode("utf-8")).decode("ascii") + key).encode("utf-8")
     ).hexdigest()
 
 
-def _signed_webhook(**overrides):
+def _php_sign(payload, key=API_KEY):
+    """Independent reimplementation of the documented PHP snippet."""
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("/", "\\/")
+    return _sign_text(encoded, key)
+
+
+def _signed_webhook(
+    *,
+    _key=API_KEY,
+    _escape_slashes=True,
+    _separators=(",", ":"),
+    **overrides,
+):
     body = {
         "type": "payment",
         "uuid": "invoice-uuid-1",
@@ -165,8 +174,15 @@ def _signed_webhook(**overrides):
         "txid": "0xabc",
     }
     body.update(overrides)
-    body["sign"] = _php_sign(body)
-    return body
+    unsigned = json.dumps(body, ensure_ascii=False, separators=_separators)
+    if _escape_slashes:
+        unsigned = unsigned.replace("/", "\\/")
+    signature = _sign_text(unsigned, _key)
+    signed = (
+        f'{unsigned[:-1]}{_separators[0]}"sign"'
+        f'{_separators[1]}"{signature}"}}'
+    )
+    return signed.encode("utf-8")
 
 
 # --------------------------------------------------------------------- signing
@@ -203,38 +219,41 @@ def test_webhook_signature_accepts_a_genuine_callback():
 def test_webhook_signature_accepts_unescaped_slashes():
     """Guards against a gateway switching to JSON_UNESCAPED_SLASHES."""
     service = _service()
-    body = {"uuid": "u", "order_id": "7", "status": "paid", "txid": "https://x/y"}
-    plain = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
-    body["sign"] = hashlib.md5(
-        (base64.b64encode(plain.encode()).decode("ascii") + API_KEY).encode()
-    ).hexdigest()
 
-    assert service.verify_webhook_sign(body) is True
+    raw_body = _signed_webhook(txid="https://x/y", _escape_slashes=False)
+
+    assert service.verify_webhook_sign(raw_body) is True
+
+
+def test_webhook_signature_preserves_the_original_json_bytes():
+    """Re-serialising this valid payload would change bytes and reject it."""
+    service = _service()
+    raw_body = _signed_webhook(
+        additional_data="https://example.com/Оплата",
+        _separators=(", ", ": "),
+    )
+
+    assert service.verify_webhook_sign(raw_body) is True
 
 
 def test_webhook_signature_rejects_a_tampered_amount():
     service = _service()
-    body = _signed_webhook()
-
-    body["amount"] = "1.00"
+    body = _signed_webhook().replace(b'"amount":"129.00"', b'"amount":"1.00"', 1)
 
     assert service.verify_webhook_sign(body) is False
 
 
 def test_webhook_signature_rejects_a_foreign_key():
     service = _service()
-    body = _signed_webhook()
-    body["sign"] = _php_sign({k: v for k, v in body.items() if k != "sign"}, key="not-the-key")
+    body = _signed_webhook(_key="not-the-key")
 
     assert service.verify_webhook_sign(body) is False
 
 
 def test_webhook_signature_rejects_a_missing_sign():
     service = _service()
-    body = _signed_webhook()
-    body.pop("sign")
 
-    assert service.verify_webhook_sign(body) is False
+    assert service.verify_webhook_sign(b'{"uuid":"u","status":"paid"}') is False
 
 
 def test_service_is_unconfigured_without_credentials():
@@ -405,11 +424,28 @@ def webhook_env(monkeypatch):
 async def test_paid_callback_activates_the_subscription(webhook_env):
     service = _service()
 
-    response = await service.webhook_route(_FakeRequest(_signed_webhook()))
+    response = await service.webhook_route(
+        _FakeRequest(
+            _signed_webhook(
+                additional_data="https://example.com/Оплата",
+                _separators=(", ", ": "),
+            )
+        )
+    )
 
     assert response.status == 200
     assert webhook_env["activated"] == [(PAYMENT_ID, "invoice-uuid-1")]
     assert webhook_env["notified"] == ["heleket"]
+
+
+async def test_malformed_callback_is_rejected_before_processing(webhook_env):
+    service = _service()
+
+    response = await service.webhook_route(_FakeRequest(b'{"type":"payment"'))
+
+    assert response.status == 400
+    assert response.text == "bad_request"
+    assert webhook_env["activated"] == []
 
 
 async def test_paid_over_also_activates(webhook_env):
@@ -465,8 +501,7 @@ async def test_cancelled_invoice_is_marked_canceled(webhook_env):
 
 async def test_forged_callback_is_rejected(webhook_env):
     service = _service()
-    body = _signed_webhook()
-    body["amount"] = "1.00"
+    body = _signed_webhook().replace(b'"amount":"129.00"', b'"amount":"1.00"', 1)
 
     response = await service.webhook_route(_FakeRequest(body))
 

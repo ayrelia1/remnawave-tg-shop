@@ -10,10 +10,10 @@ Two facts drive the shape of this module:
   the exact bytes that go on the wire — hence `data=` with a pre-rendered
   string rather than aiohttp's `json=`, which would re-serialise.
 * **The webhook signs the same way**, except the signature sits *inside* the
-  JSON body under `sign` and covers the body with that key removed. Heleket
-  signs with PHP's `json_encode`, which escapes forward slashes (`/` -> `\\/`)
-  and uses no whitespace between tokens; Python escapes neither, so the
-  canonical form has to be rebuilt before hashing.
+  JSON body under `sign` and covers the original body with that field removed.
+  The raw request bytes must be preserved: parsing and re-serialising JSON can
+  change escaping, whitespace or number formatting and invalidate a genuine
+  callback.
 """
 
 import base64
@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Dict, Any, Tuple
@@ -125,25 +126,61 @@ class HeleketService:
         encoded = base64.b64encode(body.encode("utf-8")).decode("ascii")
         return hashlib.md5(f"{encoded}{self.api_key or ''}".encode("utf-8")).hexdigest()
 
-    def verify_webhook_sign(self, data: Dict[str, Any]) -> bool:
-        """Check the `sign` carried inside a webhook body.
+    @staticmethod
+    def _strip_webhook_sign(raw_body: str, received: str) -> Optional[str]:
+        """Remove ``sign`` without re-serialising the rest of the JSON body."""
+        pattern = re.compile(r'"sign"\s*:\s*"' + re.escape(received) + r'"')
+        matches = list(pattern.finditer(raw_body))
+        if len(matches) != 1:
+            return None
 
-        The comparison is tried against both slash-escaping variants: the
-        escaped one is what PHP produces and what Heleket documents, the plain
-        one guards against a gateway-side switch to JSON_UNESCAPED_SLASHES.
-        Both still require the API key, so accepting either does not weaken the
-        check — it only avoids rejecting genuine callbacks over an encoding nit.
-        """
-        received = data.get("sign")
+        match = matches[0]
+        start, end = match.start(), match.end()
+
+        # Heleket normally appends sign as the last field. Consume the leading
+        # comma and whitespace so the exact unsigned body is reconstructed.
+        field_start = start
+        while field_start > 0 and raw_body[field_start - 1] in " \t\n\r":
+            field_start -= 1
+        if field_start > 0 and raw_body[field_start - 1] == ",":
+            return raw_body[: field_start - 1] + raw_body[end:]
+
+        # Also handle a sign placed first by consuming its following comma.
+        field_end = end
+        while field_end < len(raw_body) and raw_body[field_end] in " \t\n\r":
+            field_end += 1
+        if field_end < len(raw_body) and raw_body[field_end] == ",":
+            return raw_body[:start] + raw_body[field_end + 1 :]
+
+        # If sign is the only field, the signed representation is an empty
+        # object with the surrounding braces left intact.
+        return raw_body[:start] + raw_body[end:]
+
+    def verify_webhook_sign(
+        self,
+        raw_body: bytes,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Check the webhook signature against the original request bytes."""
+        try:
+            body_text = raw_body.decode("utf-8")
+            parsed = data if data is not None else json.loads(body_text)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+
+        if not isinstance(parsed, dict):
+            return False
+
+        received = parsed.get("sign")
         if not isinstance(received, str) or not received:
             return False
 
-        payload = {key: value for key, value in data.items() if key != "sign"}
-        for escape_slashes in (True, False):
-            candidate = self._sign(self._canonical_json(payload, escape_slashes))
-            if hmac.compare_digest(candidate, received):
-                return True
-        return False
+        unsigned_body = self._strip_webhook_sign(body_text, received)
+        if unsigned_body is None:
+            return False
+
+        candidate = self._sign(unsigned_body)
+        return hmac.compare_digest(candidate, received)
 
     # ------------------------------------------------------------------ invoices
 
@@ -300,7 +337,8 @@ class HeleketService:
             return web.Response(status=503, text="heleket_disabled")
 
         try:
-            data = await request.json()
+            raw_body = await request.read()
+            data = json.loads(raw_body)
         except Exception as exc:
             logging.error("Heleket webhook: failed to parse JSON: %s", exc)
             return web.Response(status=400, text="bad_request")
@@ -309,7 +347,7 @@ class HeleketService:
             logging.error("Heleket webhook: unexpected payload type %s", type(data).__name__)
             return web.Response(status=400, text="bad_request")
 
-        if not self.verify_webhook_sign(data):
+        if not self.verify_webhook_sign(raw_body, data):
             logging.error(
                 "Heleket webhook: signature check failed for order %s / uuid %s",
                 data.get("order_id"),
