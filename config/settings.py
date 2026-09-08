@@ -140,6 +140,13 @@ class Settings(BaseSettings):
         ),
     )
 
+    CISPAY_ENABLED: bool = Field(default=False)
+    CISPAY_BASE_URL: str = Field(default="https://api.cispay.app")
+    CISPAY_SHOP_ID: Optional[str] = None
+    CISPAY_API_KEY: Optional[str] = None
+    CISPAY_RETURN_URL: Optional[str] = Field(default=None)
+    CISPAY_FAILED_URL: Optional[str] = Field(default=None)
+
     HELEKET_ENABLED: bool = Field(default=False)
     HELEKET_MERCHANT_ID: Optional[str] = Field(
         default=None, description="Heleket merchant UUID (Dashboard -> Settings)"
@@ -192,7 +199,7 @@ class Settings(BaseSettings):
     )
     PAYMENT_METHODS_ORDER: Optional[str] = Field(
         default=None,
-        description="Comma-separated list of payment methods to show (e.g., severpay,freekassa,yookassa,platega,stars,heleket,cryptopay)",
+        description="Comma-separated list of payment methods to show (e.g., platega,cispay,yookassa,stars,heleket,cryptopay)",
     )
 
     MONTH_1_ENABLED: bool = Field(default=True, alias="1_MONTH_ENABLED")
@@ -504,6 +511,19 @@ class Settings(BaseSettings):
             return f"{base.rstrip('/')}{self.platega_webhook_path}"
         return None
 
+    @computed_field
+    @property
+    def cispay_webhook_path(self) -> str:
+        return "/webhook/cispay"
+
+    @computed_field
+    @property
+    def cispay_full_webhook_url(self) -> Optional[str]:
+        base = self.WEBHOOK_BASE_URL
+        if base:
+            return f"{base.rstrip('/')}{self.cispay_webhook_path}"
+        return None
+
     # Effective YooKassa receipt fields.
     # Explicit .env values win; otherwise keep sensible defaults derived from the recurring toggle.
     @computed_field
@@ -760,8 +780,9 @@ class Settings(BaseSettings):
         Ordered list of payment providers to show in the subscription payment keyboard.
         """
         default_order = [
-            "freekassa",
             "platega",
+            "cispay",
+            "freekassa",
             "severpay",
             "yookassa",
             "stars",
@@ -851,6 +872,8 @@ class Settings(BaseSettings):
         'HELEKET_SUCCESS_URL',
         'PLATEGA_RETURN_URL',
         'PLATEGA_FAILED_URL',
+        'CISPAY_RETURN_URL',
+        'CISPAY_FAILED_URL',
         'SEVERPAY_RETURN_URL',
         'CRYPT4_REDIRECT_URL',
         'TELEGRAM_WEBHOOK_SECRET',
@@ -1029,6 +1052,14 @@ def get_settings() -> Settings:
                 ):
                     logging.warning(
                         "CRITICAL: Platega is enabled but merchant credentials (PLATEGA_MERCHANT_ID/PLATEGA_SECRET) are missing. Platega payments will not work."
+                    )
+            if _settings_instance.CISPAY_ENABLED:
+                if (
+                    not _settings_instance.CISPAY_SHOP_ID
+                    or not _settings_instance.CISPAY_API_KEY
+                ):
+                    logging.warning(
+                        "CRITICAL: cisPay is enabled but merchant credentials (CISPAY_SHOP_ID/CISPAY_API_KEY) are missing. cisPay payments will not work."
                     )
             if _settings_instance.HELEKET_ENABLED:
                 if (

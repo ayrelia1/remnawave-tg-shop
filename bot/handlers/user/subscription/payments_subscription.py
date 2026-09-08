@@ -177,6 +177,7 @@ async def _show_payment_methods_screen(
                 [
                     settings.FREEKASSA_ENABLED,
                     settings.PLATEGA_ENABLED,
+                    settings.CISPAY_ENABLED,
                     settings.SEVERPAY_ENABLED,
                     settings.YOOKASSA_ENABLED,
                     settings.CRYPTOPAY_ENABLED,

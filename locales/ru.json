@@ -59,6 +59,7 @@
   "yookassa_autopay_charge_initiated": "::clock:: Запрос на списание отправлен\n\nСообщим, как только платёж завершится.",
   "pay_with_sbp_button": "СБП",
   "pay_with_platega_button": "Platega (СБП/карты)",
+  "pay_with_cispay_button": "cisPay (СБП/карты)",
   "pay_with_severpay_button": "SeverPay",
   "back_to_payment_methods_button": "Назад",
   "pay_with_cryptopay_button": "CryptoBot",

@@ -358,6 +358,12 @@ def get_payment_method_keyboard(months: int, price: float,
                 callback_data=f"pay_platega:{value_str}:{price}{mode_suffix}",
                 icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
             )
+        elif method == "cispay" and getattr(settings, "CISPAY_ENABLED", False):
+            builder.button(
+                text=_("pay_with_cispay_button"),
+                callback_data=f"pay_cispay:{value_str}:{price}{mode_suffix}",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+            )
         elif method == "yookassa" and settings.YOOKASSA_ENABLED:
             builder.button(
                 text=_("pay_with_yookassa_button"),

@@ -12,7 +12,7 @@
 -   **Промокоды:** Возможность применять промокоды для получения скидок или бонусных дней.
 -   **Реферальная программа:** Пользователи могут приглашать друзей и получать за это бонусные дни подписки.
 -   **Партнёрская программа:** Команда `/partner` открывает кабинет партнёра — статистика переходов и покупок по его метке за 24 часа / неделю / месяц, начисленный процент с выручки, история покупок клиентов и история выплат. Начисления фиксируются в момент оплаты по действовавшему тогда курсу и проценту, поэтому история не переписывается задним числом. Заявка на вывод — через поддержку.
-    -   **Оплата:** Поддержка оплаты через YooKassa, FreeKassa (REST API), Platega, SeverPay, CryptoPay и Telegram Stars.
+    -   **Оплата:** Поддержка оплаты через YooKassa, FreeKassa (REST API), Platega, cisPay (СБП), SeverPay, Heleket, CryptoPay и Telegram Stars.
 
 ### Для администраторов:
 -   **Защищенная админ-панель:** Доступ только для администраторов, указанных в `ADMIN_IDS`.
@@ -33,7 +33,7 @@
 -   **aiohttp:** Для запуска веб-сервера (вебхуки).
 -   **SQLAlchemy 2.x & asyncpg:** Асинхронная работа с базой данных PostgreSQL.
 -   **Alembic:** Миграции схемы базы данных.
--   **YooKassa, FreeKassa API, Platega, SeverPay, aiocryptopay:** Интеграции с платежными системами.
+-   **YooKassa, FreeKassa API, Platega, cisPay, SeverPay, Heleket, aiocryptopay:** Интеграции с платежными системами.
 -   **Pydantic:** Для управления настройками из `.env` файла.
 -   **Docker & Docker Compose:** Для контейнеризации и развертывания.
 
@@ -118,7 +118,7 @@
     | `TELEGRAM_WEBHOOK_SECRET` | (Рекомендуется) Секрет для проверки заголовка `X-Telegram-Bot-Api-Secret-Token`. |
     | `WEB_SERVER_HOST` | Хост для веб-сервера. По умолчанию `0.0.0.0`. | `0.0.0.0` |
     | `WEB_SERVER_PORT` | Порт для веб-сервера. | `8080` |
-    | `PAYMENT_METHODS_ORDER` | (Опционально) Порядок отображения кнопок оплаты через запятую. Поддерживаемые ключи: `severpay`, `freekassa`, `platega`, `yookassa`, `stars`, `cryptopay`. Первый будет сверху. |
+    | `PAYMENT_METHODS_ORDER` | (Опционально) Порядок отображения кнопок оплаты через запятую. Поддерживаемые ключи: `platega`, `cispay`, `severpay`, `freekassa`, `yookassa`, `stars`, `heleket`, `cryptopay`. Первый будет сверху. |
     | `YOOKASSA_ENABLED` | Включить/выключить YooKassa (`true`/`false`). |
     | `YOOKASSA_SHOP_ID` | ID вашего магазина в YooKassa. |
     | `YOOKASSA_SECRET_KEY`| Секретный ключ магазина YooKassa. |
@@ -147,12 +147,20 @@
     | `PLATEGA_RETURN_URL` | (Опционально) URL редиректа после успешной оплаты. По умолчанию ссылка на бота. |
     | `PLATEGA_FAILED_URL` | (Опционально) URL редиректа при ошибке/отмене. По умолчанию как `PLATEGA_RETURN_URL`. |
     | `PLATEGA_CLIENT_COMMISSION_PERCENT` | Устарело, больше не используется. Клиентская комиссия Platega накидывается поверх цены заказа и округляется на её стороне (129 ₽ → 136.10 ₽, иногда → 137 ₽), поэтому вебхук принимает любую переплату и настраивать процент не нужно. Отклоняется только недоплата. |
+    | `CISPAY_ENABLED` | Включить/выключить cisPay СБП (`true`/`false`). В боте отображается как «СБП #2». |
+    | `CISPAY_BASE_URL` | Базовый адрес cisPay API. По умолчанию `https://api.cispay.app`. |
+    | `CISPAY_SHOP_ID` | UUID магазина cisPay из личного кабинета. |
+    | `CISPAY_API_KEY` | Секретный ключ магазина (`cis_sec_...`), также используемый для проверки подписи вебхука. |
+    | `CISPAY_RETURN_URL` | (Опционально) URL редиректа после успешной оплаты. По умолчанию ссылка на бота. |
+    | `CISPAY_FAILED_URL` | (Опционально) URL редиректа при неуспешной оплате. По умолчанию как `CISPAY_RETURN_URL`. |
     | `SEVERPAY_ENABLED` | Включить/выключить SeverPay (`true`/`false`). |
     | `SEVERPAY_MID` | MID магазина в SeverPay. |
     | `SEVERPAY_TOKEN` | Секрет/токен для подписи запросов SeverPay. |
     | `SEVERPAY_BASE_URL` | (Опционально) Базовый URL API SeverPay. По умолчанию `https://severpay.io/api/merchant`. |
     | `SEVERPAY_RETURN_URL` | (Опционально) URL редиректа после оплаты (по умолчанию ссылка на бота). |
     | `SEVERPAY_LIFETIME_MINUTES` | (Опционально) Время жизни платежной ссылки в минутах (30–4320). |
+
+    Комиссия cisPay на стороне покупателя настраивается в личном кабинете cisPay. Бот передаёт чистую стоимость заказа, а фактически списанная стоимость с комиссией приходит в `charged_amount`; для комиссии 2% сумма 129 ₽ будет списана как 131,58 ₽.
     </details>
 
     <details>
@@ -210,7 +218,7 @@
     Эта команда скачает образ и запустит сервис в фоновом режиме.
 
 4.  **Настройка вебхуков (Обязательно):**
-    Вебхуки являются **обязательным** компонентом для работы бота, так как они используются для получения уведомлений от платежных систем (YooKassa, FreeKassa, CryptoPay, Platega, SeverPay) и панели Remnawave.
+    Вебхуки являются **обязательным** компонентом для работы бота, так как они используются для получения уведомлений от платежных систем (YooKassa, FreeKassa, CryptoPay, Platega, cisPay, SeverPay, Heleket) и панели Remnawave.
 
     Вам понадобится обратный прокси (например, Nginx) для обработки HTTPS-трафика и перенаправления запросов на контейнер с ботом.
 
@@ -218,6 +226,7 @@
     -   `https://<ваш_домен>/webhook/yookassa` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/yookassa`
     -   `https://<ваш_домен>/webhook/freekassa` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/freekassa`
     -   `https://<ваш_домен>/webhook/platega` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/platega`
+    -   `https://<ваш_домен>/webhook/cispay` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/cispay`
     -   `https://<ваш_домен>/webhook/severpay` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/severpay`
     -   `https://<ваш_домен>/webhook/cryptopay` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/cryptopay`
     -   `https://<ваш_домен>/webhook/panel` → `http://remnawave-tg-shop:<WEB_SERVER_PORT>/webhook/panel`

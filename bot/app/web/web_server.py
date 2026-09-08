@@ -33,6 +33,7 @@ async def build_and_start_web_app(
         "cryptopay_service",
         "panel_webhook_service",
         "platega_service",
+        "cispay_service",
         "severpay_service",
     ):
         # Access dispatcher workflow_data directly to avoid sequence protocol issues
@@ -66,6 +67,7 @@ async def build_and_start_web_app(
     from bot.services.freekassa_service import freekassa_webhook_route
     from bot.services.heleket_service import heleket_webhook_route
     from bot.services.platega_service import platega_webhook_route
+    from bot.services.cispay_service import cispay_webhook_route
     from bot.services.severpay_service import severpay_webhook_route
 
     cp_path = settings.cryptopay_webhook_path
@@ -87,6 +89,11 @@ async def build_and_start_web_app(
     if pg_path.startswith("/"):
         app.router.add_post(pg_path, platega_webhook_route)
         logging.info(f"Platega webhook route configured at: [POST] {pg_path}")
+
+    cis_path = settings.cispay_webhook_path
+    if cis_path.startswith("/"):
+        app.router.add_post(cis_path, cispay_webhook_route)
+        logging.info(f"cisPay webhook route configured at: [POST] {cis_path}")
 
     sp_path = settings.severpay_webhook_path
     if sp_path.startswith("/"):
