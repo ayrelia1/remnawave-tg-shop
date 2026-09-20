@@ -1,4 +1,5 @@
 import logging
+from html import escape
 from aiogram import Router, F, types
 from typing import Optional, Dict, List
 from datetime import datetime
@@ -15,6 +16,20 @@ from bot.keyboards.inline.admin_keyboards import get_back_to_admin_panel_keyboar
 from bot.middlewares.i18n import JsonI18n
 
 router = Router(name="admin_statistics_router")
+
+
+def _html(value: object) -> str:
+    """Escape dynamic values before inserting them into Telegram HTML."""
+    return escape(str(value))
+
+
+def _format_payment_user_info(payment: Payment) -> str:
+    user_info = f"User {_html(payment.user_id)}"
+    if payment.user and payment.user.username:
+        user_info += f" (@{_html(payment.user.username)})"
+    elif payment.user and payment.user.first_name:
+        user_info += f" ({_html(payment.user.first_name)})"
+    return user_info
 
 
 async def show_statistics_handler(callback: types.CallbackQuery,
@@ -127,11 +142,11 @@ async def show_statistics_handler(callback: types.CallbackQuery,
                 
                 if week_traffic:
                     week_total = week_traffic.get('current', '0 B')
-                    stats_text_parts.append(f"📊 {_('admin_panel_traffic_week_label')}: <b>{week_total}</b>")
+                    stats_text_parts.append(f"📊 {_('admin_panel_traffic_week_label')}: <b>{_html(week_total)}</b>")
                     
                 if month_traffic:
                     month_total = month_traffic.get('current', '0 B')
-                    stats_text_parts.append(f"📊 {_('admin_panel_traffic_month_label')}: <b>{month_total}</b>")
+                    stats_text_parts.append(f"📊 {_('admin_panel_traffic_month_label')}: <b>{_html(month_total)}</b>")
             else:
                 stats_text_parts.append(f"⚠️ {_('admin_panel_bandwidth_stats_error')}")
             
@@ -154,7 +169,7 @@ async def show_statistics_handler(callback: types.CallbackQuery,
     except Exception as e:
         logging.error(f"Failed to fetch panel statistics: {e}", exc_info=True)
         stats_text_parts.append(f"❌ {_('admin_panel_stats_fetch_error')}")
-        stats_text_parts.append(f"⚠️ {_('admin_panel_stats_error_details')}: {str(e)}")
+        stats_text_parts.append(f"⚠️ {_('admin_panel_stats_error_details')}: {_html(e)}")
 
     # Financial statistics
     financial_stats = await payment_dal.get_financial_statistics(session)
@@ -200,11 +215,7 @@ async def show_statistics_handler(callback: types.CallbackQuery,
                 else "❌"
             )
 
-            user_info = f"User {payment.user_id}"
-            if payment.user and payment.user.username:
-                user_info += f" (@{payment.user.username})"
-            elif payment.user and payment.user.first_name:
-                user_info += f" ({payment.user.first_name})"
+            user_info = _format_payment_user_info(payment)
 
             payment_date_str = payment.created_at.strftime(
                 '%Y-%m-%d') if payment.created_at else "N/A"
@@ -212,10 +223,10 @@ async def show_statistics_handler(callback: types.CallbackQuery,
             stats_text_parts.append(
                 _("admin_stats_payment_item",
                   status_emoji=status_emoji,
-                  amount=payment.amount,
-                  currency=payment.currency,
+                  amount=_html(payment.amount),
+                  currency=_html(payment.currency),
                   user_info=user_info,
-                  p_status=payment.status,
+                  p_status=_html(payment.status),
                   p_date=payment_date_str))
     else:
         stats_text_parts.append(f"\n{_('admin_stats_no_payments_found')}")
@@ -231,12 +242,12 @@ async def show_statistics_handler(callback: types.CallbackQuery,
             '%Y-%m-%d %H:%M:%S UTC') if sync_time_val else "N/A"
 
         details_val = sync_status_model.details
-        details_str = details_val or "N/A"
+        details_str = _html(details_val or "N/A")
 
         stats_text_parts.append(
             f"  {_('admin_stats_sync_time')}: {sync_time_str}")
         stats_text_parts.append(
-            f"  {_('admin_stats_sync_status')}: {sync_status_model.status}")
+            f"  {_('admin_stats_sync_status')}: {_html(sync_status_model.status)}")
         stats_text_parts.append(
             f"  {_('admin_stats_sync_users_processed')}: {sync_status_model.users_processed_from_panel}"
         )
