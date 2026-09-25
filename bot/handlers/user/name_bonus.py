@@ -2,16 +2,22 @@
 
 from aiogram import F, Router, Bot, types
 from aiogram.exceptions import TelegramAPIError
+from datetime import datetime, timedelta, timezone
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.services.name_bonus_service import BONUS_DAYS, NameBonusService
+from bot.services.name_bonus_service import BONUS_DAYS, NameBonusService, as_utc
 from bot.services.notification_service import NotificationService
 from bot.services.panel_api_service import PanelApiService
 from config.settings import Settings
 
 
 router = Router(name="user_name_bonus_router")
+MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
+
+
+def format_moscow_time(value: datetime) -> str:
+    return as_utc(value).astimezone(MOSCOW_TIMEZONE).strftime("%d.%m.%Y %H:%M МСК")
 
 
 @router.callback_query(F.data == "name_bonus:claim")
@@ -42,14 +48,14 @@ async def claim_name_bonus(
         try:
             await bot.send_message(
                 callback.from_user.id,
-                _(key, end_date=result.end_date.strftime("%d.%m.%Y %H:%M UTC") if result.end_date else ""),
+                _(key, end_date=format_moscow_time(result.end_date) if result.end_date else ""),
             )
         except TelegramAPIError:
             logging.warning("Could not send name bonus confirmation to %s", callback.from_user.id, exc_info=True)
         return
 
     if result.status == "cooldown" and result.next_at:
-        text = _("name_bonus_cooldown", next_at=result.next_at.strftime("%d.%m.%Y %H:%M"))
+        text = _("name_bonus_cooldown", next_at=format_moscow_time(result.next_at))
     else:
         text = _({
             "disabled": "name_bonus_disabled",

@@ -81,6 +81,14 @@ def get_main_menu_inline_keyboard(
             icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIPTION,
         )
     )
+    if settings.NAME_BONUS_ENABLED:
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="tasks_button"),
+                callback_data="tasks:menu",
+                icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
+            )
+        )
     info_button = InlineKeyboardButton(
         text=_(key="menu_info_button"),
         callback_data="main_action:info",
@@ -134,15 +142,46 @@ def get_main_menu_inline_keyboard(
             )
         )
 
-    if settings.NAME_BONUS_ENABLED:
-        builder.row(
-            InlineKeyboardButton(
-                text=_(key="name_bonus_button"),
-                callback_data="name_bonus:claim",
-                icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
-            )
-        )
+    return builder.as_markup()
 
+
+def get_tasks_keyboard(lang: str, i18n_instance) -> InlineKeyboardMarkup:
+    _ = lambda key: i18n_instance.gettext(lang, key)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=_("tasks_name_bonus_button"),
+            callback_data="tasks:name_bonus",
+            icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=_("back_to_main_menu_button"),
+            callback_data="main_action:back_to_main",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
+    return builder.as_markup()
+
+
+def get_name_bonus_task_keyboard(lang: str, i18n_instance) -> InlineKeyboardMarkup:
+    _ = lambda key: i18n_instance.gettext(lang, key)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=_("name_bonus_claim_button"),
+            callback_data="name_bonus:claim",
+            icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=_("tasks_back_button"),
+            callback_data="tasks:menu",
+            icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
+        )
+    )
     return builder.as_markup()
 
 

@@ -384,7 +384,7 @@ class NotificationService:
             user_display=self._format_user_display(user_id=user_id, username=username),
             bonus_days=bonus_days,
             end_date=end_date.strftime("%Y-%m-%d %H:%M"),
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         )
         await self._send_to_log_channel(
             message,

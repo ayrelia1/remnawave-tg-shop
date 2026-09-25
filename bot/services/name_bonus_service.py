@@ -1,6 +1,7 @@
 """Claim and monitor the Telegram first-name bonus for previous buyers."""
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
@@ -14,7 +15,7 @@ from bot.services.subscription_service import SubscriptionService
 
 BONUS_DAYS = 5
 COOLDOWN_DAYS = 30
-NAME_PREFIX = "@mansurvpn_bot"
+NAME_PATTERN = re.compile(r"mansur\s*vpn", re.IGNORECASE)
 
 
 def as_utc(value: datetime) -> datetime:
@@ -22,7 +23,7 @@ def as_utc(value: datetime) -> datetime:
 
 
 def matches_name(first_name: str | None) -> bool:
-    return bool(first_name and first_name.casefold().startswith(NAME_PREFIX))
+    return bool(first_name and NAME_PATTERN.search(first_name))
 
 
 @dataclass(frozen=True)
@@ -213,13 +214,8 @@ class NameBonusService:
             return
         user = await user_dal.get_user_by_id(session, claim.user_id)
         lang = user.language_code if user and user.language_code else self.settings.DEFAULT_LANGUAGE
-        minutes_total = ceil(claim.reclaimed_seconds / 60)
-        days, minutes_left = divmod(minutes_total, 24 * 60)
-        hours, minutes = divmod(minutes_left, 60)
         message = (
-            self.i18n.gettext(
-                lang, "name_bonus_revoked", days=days, hours=hours, minutes=minutes
-            )
+            self.i18n.gettext(lang, "name_bonus_revoked")
             if self.i18n else "Your remaining name bonus has been revoked."
         )
         try:

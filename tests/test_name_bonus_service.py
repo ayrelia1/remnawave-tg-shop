@@ -10,17 +10,22 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot.services.name_bonus_service import ClaimResult, NameBonusService, as_utc, matches_name
 from bot.services.notification_service import NotificationService
-from bot.handlers.user.name_bonus import claim_name_bonus
+from bot.handlers.user.name_bonus import claim_name_bonus, format_moscow_time
+from bot.handlers.user import tasks as tasks_handler
 from bot.handlers.admin import statistics as admin_statistics
 from bot.middlewares.i18n import JsonI18n
 from bot.services.subscription_service import SubscriptionService
-from bot.keyboards.inline.user_keyboards import get_main_menu_inline_keyboard
+from bot.keyboards.inline.user_keyboards import (
+    get_main_menu_inline_keyboard,
+    get_name_bonus_task_keyboard,
+    get_tasks_keyboard,
+)
 from db.dal.name_bonus_dal import get_bonus_statistics
 from db.models import Base, NameBonusClaim, Payment, Subscription, User
 
 
 class FakeBot:
-    def __init__(self, first_name="@mansurvpn_bot Alice"):
+    def __init__(self, first_name="Alice Mansur VPN"):
         self.first_name = first_name
         self.messages = []
 
@@ -94,11 +99,22 @@ async def seed_user(session, *, payment=True, active=True):
     await session.commit()
 
 
-def test_name_must_start_with_prefix():
-    assert matches_name("@mansurvpn_bot Alice")
-    assert matches_name("@MANSURVPN_BOT Alice")
-    assert not matches_name("Alice @mansurvpn_bot")
-    assert not matches_name(None)
+@pytest.mark.parametrize("first_name", [
+    "Mansur VPN Alice",
+    "Alice Mansur VPN",
+    "Alice mAnSuR vPn Bob",
+    "MANSURVPN",
+    "Alice mansurvpn",
+    "Alice Mansur   VPN",
+    "Alice @mansurvpn_bot",
+])
+def test_name_accepts_brand_anywhere_and_in_any_case(first_name):
+    assert matches_name(first_name)
+
+
+@pytest.mark.parametrize("first_name", [None, "", "Alice", "Mansur", "VPN", "Man sur VPN"])
+def test_name_rejects_missing_brand(first_name):
+    assert not matches_name(first_name)
 
 
 def test_main_menu_button_respects_switch():
@@ -111,12 +127,65 @@ def test_main_menu_button_respects_switch():
     )
     i18n = FakeI18n()
     enabled = get_main_menu_inline_keyboard("ru", i18n, options)
-    assert any(button.callback_data == "name_bonus:claim" for row in enabled.inline_keyboard for button in row)
-    assert enabled.inline_keyboard[-2][0].text == "menu_channel_subscribe_button"
-    assert enabled.inline_keyboard[-1][0].callback_data == "name_bonus:claim"
+    callbacks = [button.callback_data for row in enabled.inline_keyboard for button in row]
+    subscription_index = callbacks.index("main_action:my_subscription")
+    assert callbacks[subscription_index + 1] == "tasks:menu"
+    assert "name_bonus:claim" not in callbacks
+    assert enabled.inline_keyboard[-1][0].text == "menu_channel_subscribe_button"
     options.NAME_BONUS_ENABLED = False
     disabled = get_main_menu_inline_keyboard("ru", i18n, options)
-    assert not any(button.callback_data == "name_bonus:claim" for row in disabled.inline_keyboard for button in row)
+    assert not any(button.callback_data == "tasks:menu" for row in disabled.inline_keyboard for button in row)
+
+
+def test_task_keyboards_and_labels():
+    i18n = JsonI18n(str(Path(__file__).resolve().parents[1] / "locales"), default="ru")
+    assert i18n.gettext("ru", "tasks_button") == "Задания"
+    assert i18n.gettext("en", "tasks_button") == "Tasks"
+    task_list = get_tasks_keyboard("ru", i18n)
+    task_detail = get_name_bonus_task_keyboard("ru", i18n)
+    assert task_list.inline_keyboard[0][0].text == "5 дней за имя Telegram"
+    assert task_list.inline_keyboard[0][0].callback_data == "tasks:name_bonus"
+    assert task_list.inline_keyboard[1][0].callback_data == "main_action:back_to_main"
+    assert task_detail.inline_keyboard[0][0].callback_data == "name_bonus:claim"
+    assert task_detail.inline_keyboard[1][0].callback_data == "tasks:menu"
+    assert "Mansur VPN" in i18n.gettext("ru", "name_bonus_task_description")
+    assert "MansurVPN" in i18n.gettext("ru", "name_bonus_task_description")
+
+
+@pytest.mark.asyncio
+async def test_task_screens_show_premium_emoji_and_respect_switch(monkeypatch):
+    i18n = JsonI18n(str(Path(__file__).resolve().parents[1] / "locales"), default="ru")
+    edits = []
+    answers = []
+
+    async def capture_edit(message, text, reply_markup):
+        edits.append((text, reply_markup))
+
+    async def answer(text=None, show_alert=False):
+        answers.append((text, show_alert))
+
+    monkeypatch.setattr(tasks_handler, "safe_edit_text", capture_edit)
+    callback = SimpleNamespace(message=object(), answer=answer)
+    settings = SimpleNamespace(DEFAULT_LANGUAGE="ru", NAME_BONUS_ENABLED=True)
+    i18n_data = {"i18n_instance": i18n, "current_language": "ru"}
+
+    await tasks_handler.show_tasks(callback, settings, i18n_data)
+    await tasks_handler.show_name_bonus_task(callback, settings, i18n_data)
+    assert len(edits) == 2
+    assert all("<tg-emoji" in text for text, _ in edits)
+    assert edits[0][1].inline_keyboard[0][0].callback_data == "tasks:name_bonus"
+    assert edits[1][1].inline_keyboard[0][0].callback_data == "name_bonus:claim"
+    assert "каждые 30 минут" not in edits[1][0]
+
+    settings.NAME_BONUS_ENABLED = False
+    await tasks_handler.show_tasks(callback, settings, i18n_data)
+    assert len(edits) == 2
+    assert answers[-1][1] is True
+    assert answers[-1][0].startswith("⛔")
+
+
+def test_bonus_timestamps_use_moscow_time():
+    assert format_moscow_time(datetime(2026, 10, 1, tzinfo=timezone.utc)) == "01.10.2026 03:00 МСК"
 
 
 def test_bonus_callback_alerts_use_plain_text():
@@ -128,7 +197,9 @@ def test_bonus_callback_alerts_use_plain_text():
     )
     for language in ("ru", "en"):
         for key in alert_keys:
-            assert "<" not in i18n.gettext(language, key)
+            alert = i18n.gettext(language, key)
+            assert "<" not in alert
+            assert not alert[0].isalpha()
 
 
 @pytest.mark.asyncio
@@ -147,6 +218,24 @@ async def test_paid_user_can_claim_once_then_wait_30_days(db_session_factory):
     assert len(claims) == 1
     assert abs(((after - before) - timedelta(days=5)).total_seconds()) < 1
     assert service.panel_service.updates[-1][1]["status"] == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_changing_brand_case_and_position_does_not_revoke_bonus(db_session_factory):
+    bot = FakeBot("Alice Mansur VPN")
+    service = make_service(bot=bot)
+    async with db_session_factory() as session:
+        await seed_user(session)
+        result = await service.claim(session, 123)
+        assert result.status == "granted"
+
+    bot.first_name = "MANSURVPN Alice"
+    await service.run_checks(db_session_factory)
+
+    async with db_session_factory() as session:
+        claim = (await session.execute(select(NameBonusClaim))).scalar_one()
+    assert claim.status == "active"
+    assert not bot.messages
 
 
 @pytest.mark.asyncio
@@ -232,7 +321,7 @@ async def test_removed_name_reclaims_only_unelapsed_bonus(db_session_factory):
     )
     assert abs((panel_expiry - as_utc(after)).total_seconds()) < 0.01
 
-    bot.first_name = "@mansurvpn_bot Alice"
+    bot.first_name = "MansurVPN Alice"
     async with db_session_factory() as session:
         again = await service.claim(session, 123)
     assert again.status == "cooldown"
@@ -363,12 +452,13 @@ async def test_claim_sends_admin_notice_in_users_topic(monkeypatch):
         return ClaimResult("granted", end_date=datetime(2026, 10, 1, tzinfo=timezone.utc), panel_synced=True)
 
     notices = []
+    answers = []
 
     async def capture_notice(self, message, thread_id=None, reply_markup=None):
         notices.append((message, thread_id, reply_markup))
 
     async def answer(text=None, show_alert=False):
-        return None
+        answers.append((text, show_alert))
 
     monkeypatch.setattr(NameBonusService, "claim", fake_claim)
     monkeypatch.setattr(NotificationService, "_send_to_log_channel", capture_notice)
@@ -393,6 +483,23 @@ async def test_claim_sends_admin_notice_in_users_topic(monkeypatch):
     assert "5 дн." in notices[0][0]
     assert notices[0][1] == 88
     assert notices[0][2].inline_keyboard[0][0].url == "tg://user?id=123"
+    assert "2026-10-01 00:00 UTC" in notices[0][0]
+    assert "01.10.2026 03:00 МСК" in bot.messages[0][1]
+    assert "<tg-emoji" in bot.messages[0][1]
+    assert "каждые 30 минут" not in bot.messages[0][1]
+    assert answers[0][0].startswith("✅")
+
+    async def cooldown_claim(self, session, user_id):
+        return ClaimResult("cooldown", next_at=datetime(2026, 10, 1, tzinfo=timezone.utc))
+
+    monkeypatch.setattr(NameBonusService, "claim", cooldown_claim)
+    await claim_name_bonus(
+        callback, settings, {"i18n_instance": i18n, "current_language": "ru"},
+        bot, FakePanel(), None,
+    )
+    assert "01.10.2026 03:00 МСК" in answers[-1][0]
+    assert answers[-1][1] is True
+    assert len(notices) == 1
 
 
 @pytest.mark.asyncio
