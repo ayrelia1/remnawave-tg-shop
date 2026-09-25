@@ -18,7 +18,7 @@
   "name_bonus_claimed_pending": "🎁 Your 5-day bonus is reserved. Updating access is delayed; the bot will retry automatically. Your access will run until <b>{end_date}</b> after the update. Keep <code>@mansurvpn_bot</code> at the start of your Telegram first name for the next 5 days.",
   "name_bonus_disabled": "This offer is currently unavailable.",
   "name_bonus_purchase_required": "This bonus requires at least one paid purchase.",
-  "name_bonus_name_required": "Put <code>@mansurvpn_bot</code> at the start of your Telegram first name, then tap the button again.",
+  "name_bonus_name_required": "⚠️ Put @mansurvpn_bot at the start of your Telegram first name, then tap the button again.",
   "name_bonus_telegram_error": "Could not check your Telegram name. Please try again later.",
   "name_bonus_panel_error": "Could not prepare your bonus access. Please try again later.",
   "name_bonus_cooldown": "You already claimed this bonus. You can claim it again from {next_at} (UTC).",

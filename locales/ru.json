@@ -18,7 +18,7 @@
   "name_bonus_claimed_pending": "🎁 5 дней закреплены за вами. Обновление срока доступа задерживается; бот повторит попытку автоматически. После обновления доступ будет до <b>{end_date}</b>. Держите <code>@mansurvpn_bot</code> в начале имени Telegram следующие 5 дней.",
   "name_bonus_disabled": "Акция сейчас отключена.",
   "name_bonus_purchase_required": "Бонус доступен после хотя бы одной оплаченной покупки.",
-  "name_bonus_name_required": "Поставьте <code>@mansurvpn_bot</code> в начало поля «Имя» вашего профиля Telegram и нажмите кнопку ещё раз.",
+  "name_bonus_name_required": "⚠️ Поставьте @mansurvpn_bot в начало поля «Имя» вашего профиля Telegram и нажмите кнопку ещё раз.",
   "name_bonus_telegram_error": "Не удалось проверить имя в Telegram. Попробуйте позже.",
   "name_bonus_panel_error": "Не удалось подготовить бонусный доступ. Попробуйте позже.",
   "name_bonus_cooldown": "Вы уже получали бонус. Следующий раз — не раньше {next_at} (UTC).",

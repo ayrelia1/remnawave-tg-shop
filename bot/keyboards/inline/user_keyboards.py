@@ -81,15 +81,6 @@ def get_main_menu_inline_keyboard(
             icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIPTION,
         )
     )
-    if settings.NAME_BONUS_ENABLED:
-        builder.row(
-            InlineKeyboardButton(
-                text=_(key="name_bonus_button"),
-                callback_data="name_bonus:claim",
-                icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
-            )
-        )
-
     info_button = InlineKeyboardButton(
         text=_(key="menu_info_button"),
         callback_data="main_action:info",
@@ -140,6 +131,15 @@ def get_main_menu_inline_keyboard(
                 text=_(key="menu_channel_subscribe_button"),
                 url=settings.REQUIRED_CHANNEL_LINK,
                 icon_custom_emoji_id=PREMIUM_EMOJI_MEGAPHONE,
+            )
+        )
+
+    if settings.NAME_BONUS_ENABLED:
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="name_bonus_button"),
+                callback_data="name_bonus:claim",
+                icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
             )
         )
 

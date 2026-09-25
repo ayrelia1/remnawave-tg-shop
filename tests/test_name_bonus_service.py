@@ -107,14 +107,28 @@ def test_main_menu_button_respects_switch():
         REFERRAL_ENABLED=False,
         SERVER_STATUS_URL=None,
         SUPPORT_LINK=None,
-        REQUIRED_CHANNEL_LINK=None,
+        REQUIRED_CHANNEL_LINK="https://t.me/example",
     )
     i18n = FakeI18n()
     enabled = get_main_menu_inline_keyboard("ru", i18n, options)
     assert any(button.callback_data == "name_bonus:claim" for row in enabled.inline_keyboard for button in row)
+    assert enabled.inline_keyboard[-2][0].text == "menu_channel_subscribe_button"
+    assert enabled.inline_keyboard[-1][0].callback_data == "name_bonus:claim"
     options.NAME_BONUS_ENABLED = False
     disabled = get_main_menu_inline_keyboard("ru", i18n, options)
     assert not any(button.callback_data == "name_bonus:claim" for row in disabled.inline_keyboard for button in row)
+
+
+def test_bonus_callback_alerts_use_plain_text():
+    i18n = JsonI18n(str(Path(__file__).resolve().parents[1] / "locales"), default="ru")
+    alert_keys = (
+        "name_bonus_claimed_alert", "name_bonus_disabled", "name_bonus_purchase_required",
+        "name_bonus_name_required", "name_bonus_telegram_error", "name_bonus_panel_error",
+        "name_bonus_cooldown",
+    )
+    for language in ("ru", "en"):
+        for key in alert_keys:
+            assert "<" not in i18n.gettext(language, key)
 
 
 @pytest.mark.asyncio
