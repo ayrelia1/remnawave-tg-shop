@@ -25,8 +25,7 @@ def as_utc(value: datetime) -> datetime:
 def matches_name(first_name: str | None) -> bool:
     if not first_name:
         return False
-    name = first_name.casefold()
-    return NAME_TAG.casefold() in name or NAME_PHRASE.casefold() in name
+    return NAME_TAG in first_name or NAME_PHRASE in first_name
 
 
 @dataclass(frozen=True)

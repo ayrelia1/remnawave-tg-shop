@@ -25,7 +25,7 @@ from db.models import Base, NameBonusClaim, Payment, Subscription, User
 
 
 class FakeBot:
-    def __init__(self, first_name="Alice @MansurVpn_bot"):
+    def __init__(self, first_name="Alice @MansurVPN_BOT"):
         self.first_name = first_name
         self.messages = []
 
@@ -100,20 +100,20 @@ async def seed_user(session, *, payment=True, active=True):
 
 
 @pytest.mark.parametrize("first_name", [
-    "@mansurvpn_bot Alice",
-    "Alice @mansurvpn_bot",
-    "Alice @MansurVpn_bot",
-    "Alice @MANSURVPN_BOT Bob",
+    "@MansurVPN_BOT Alice",
+    "Alice @MansurVPN_BOT",
+    "Alice @MansurVPN_BOT Bob",
     "Mansur VPN Alice",
     "Alice Mansur VPN",
-    "Alice mAnSuR vPn Bob",
 ])
-def test_name_accepts_either_variant_anywhere_and_in_any_case(first_name):
+def test_name_accepts_exact_case_variants_anywhere(first_name):
     assert matches_name(first_name)
 
 
 @pytest.mark.parametrize("first_name", [
-    None, "", "Alice", "MansurVPN", "mansurvpn_bot", "@mansurvpn", "Mansur VNP",
+    None, "", "Alice", "MansurVPN", "mansurvpn_bot", "@mansurvpn",
+    "@mansurvpn_bot Alice", "Alice @MansurVpn_bot", "Alice @MANSURVPN_BOT",
+    "mansur vpn", "MANSUR VPN", "Alice mAnSuR vPn", "Mansur VNP",
 ])
 def test_name_rejects_missing_variant(first_name):
     assert not matches_name(first_name)
@@ -237,20 +237,38 @@ async def test_phrase_can_claim_bonus(db_session_factory):
 
 @pytest.mark.asyncio
 async def test_switching_from_tag_to_phrase_does_not_revoke_bonus(db_session_factory):
-    bot = FakeBot("Alice @mansurvpn_bot")
+    bot = FakeBot("Alice @MansurVPN_BOT")
     service = make_service(bot=bot)
     async with db_session_factory() as session:
         await seed_user(session)
         result = await service.claim(session, 123)
         assert result.status == "granted"
 
-    bot.first_name = "MANSUR VPN Alice"
+    bot.first_name = "Mansur VPN Alice"
     await service.run_checks(db_session_factory)
 
     async with db_session_factory() as session:
         claim = (await session.execute(select(NameBonusClaim))).scalar_one()
     assert claim.status == "active"
     assert not bot.messages
+
+
+@pytest.mark.asyncio
+async def test_changing_only_letter_case_revokes_bonus(db_session_factory):
+    bot = FakeBot("Alice @MansurVPN_BOT")
+    service = make_service(bot=bot)
+    async with db_session_factory() as session:
+        await seed_user(session)
+        result = await service.claim(session, 123)
+        assert result.status == "granted"
+
+    bot.first_name = "Alice @mansurvpn_bot"
+    await service.run_checks(db_session_factory)
+
+    async with db_session_factory() as session:
+        claim = (await session.execute(select(NameBonusClaim))).scalar_one()
+    assert claim.status == "revoked"
+    assert len(bot.messages) == 1
 
 
 @pytest.mark.asyncio
@@ -336,7 +354,7 @@ async def test_removed_name_reclaims_only_unelapsed_bonus(db_session_factory):
     )
     assert abs((panel_expiry - as_utc(after)).total_seconds()) < 0.01
 
-    bot.first_name = "@mansurvpn_bot Alice"
+    bot.first_name = "@MansurVPN_BOT Alice"
     async with db_session_factory() as session:
         again = await service.claim(session, 123)
     assert again.status == "cooldown"
