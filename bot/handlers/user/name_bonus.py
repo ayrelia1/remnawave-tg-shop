@@ -5,7 +5,8 @@ from aiogram.exceptions import TelegramAPIError
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.services.name_bonus_service import NameBonusService
+from bot.services.name_bonus_service import BONUS_DAYS, NameBonusService
+from bot.services.notification_service import NotificationService
 from bot.services.panel_api_service import PanelApiService
 from config.settings import Settings
 
@@ -29,6 +30,13 @@ async def claim_name_bonus(
     result = await service.claim(session, callback.from_user.id)
 
     if result.status == "granted":
+        if result.end_date is not None:
+            await NotificationService(bot, settings, i18n).notify_name_bonus_claim(
+                callback.from_user.id,
+                BONUS_DAYS,
+                result.end_date,
+                username=callback.from_user.username,
+            )
         await callback.answer(_("name_bonus_claimed_alert"), show_alert=True)
         key = "name_bonus_claimed" if result.panel_synced else "name_bonus_claimed_pending"
         try:

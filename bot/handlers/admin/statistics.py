@@ -2,13 +2,13 @@ import logging
 from html import escape
 from aiogram import Router, F, types
 from typing import Optional, Dict, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import Settings
 from config.currency import BASE_CURRENCY
 
-from db.dal import user_dal, payment_dal, panel_sync_dal
+from db.dal import user_dal, payment_dal, panel_sync_dal, name_bonus_dal
 from db.models import Payment, PanelSyncStatus
 from bot.services.panel_api_service import PanelApiService
 
@@ -89,6 +89,26 @@ async def show_statistics_handler(callback: types.CallbackQuery,
     )
     stats_text_parts.append(
         f"🎁 {_('admin_user_stats_referral_label')}: <b>{user_stats['referral_users']}</b>"
+    )
+
+    bonus_stats = await name_bonus_dal.get_bonus_statistics(session, datetime.now(timezone.utc))
+    stats_text_parts.append(f"\n<b>🎁 {_('admin_name_bonus_stats_header')}</b>")
+    stats_text_parts.append(
+        f"📊 {_('admin_name_bonus_claims_label')}: <b>{bonus_stats['total_claims']}</b> "
+        f"({_('admin_name_bonus_users_label')}: {bonus_stats['users']})"
+    )
+    stats_text_parts.append(
+        f"🔎 {_('admin_name_bonus_monitoring_label')}: <b>{bonus_stats['monitoring']}</b>"
+    )
+    stats_text_parts.append(
+        f"↩️ {_('admin_name_bonus_revoked_label')}: <b>{bonus_stats['revoked']}</b>"
+    )
+    stats_text_parts.append(
+        f"🗓 {_('admin_name_bonus_granted_label')}: <b>{bonus_stats['granted_days']}</b>"
+    )
+    stats_text_parts.append(
+        f"⏳ {_('admin_name_bonus_reclaimed_label')}: "
+        f"<b>{bonus_stats['reclaimed_seconds'] / 3600:.1f}</b>"
     )
     
     # Panel Statistics - moved above financial

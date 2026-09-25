@@ -372,6 +372,26 @@ class NotificationService:
         profile_keyboard = self._build_profile_keyboard(_, user_id)
         await self._send_to_log_channel(message, thread_id=self._thread_id_for("users"), reply_markup=profile_keyboard)
 
+    async def notify_name_bonus_claim(
+        self, user_id: int, bonus_days: int, end_date: datetime,
+        username: Optional[str] = None,
+    ) -> None:
+        """Log a granted name bonus in the same admin topic as trial activations."""
+        admin_lang = self.settings.DEFAULT_LANGUAGE
+        _ = lambda k, **kw: self.i18n.gettext(admin_lang, k, **kw) if self.i18n else k
+        message = _(
+            "log_name_bonus_claim",
+            user_display=self._format_user_display(user_id=user_id, username=username),
+            bonus_days=bonus_days,
+            end_date=end_date.strftime("%Y-%m-%d %H:%M"),
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        await self._send_to_log_channel(
+            message,
+            thread_id=self._thread_id_for("users"),
+            reply_markup=self._build_profile_keyboard(_, user_id),
+        )
+
     async def notify_panel_sync(self, status: str, details: str, 
                                users_processed: int, subs_synced: int,
                                username: Optional[str] = None):

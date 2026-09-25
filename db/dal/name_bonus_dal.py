@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import NameBonusClaim, Payment, Subscription, User
@@ -145,3 +145,28 @@ async def list_claim_ids_needing_checks(session: AsyncSession) -> list[int]:
         )).order_by(NameBonusClaim.id)
     )
     return list(result.scalars().all())
+
+
+async def get_bonus_statistics(session: AsyncSession, now: datetime) -> dict[str, int]:
+    result = await session.execute(
+        select(
+            func.count(NameBonusClaim.id),
+            func.count(func.distinct(NameBonusClaim.user_id)),
+            func.count(NameBonusClaim.id).filter(
+                NameBonusClaim.status == "active",
+                NameBonusClaim.monitor_until > now,
+            ),
+            func.count(NameBonusClaim.id).filter(NameBonusClaim.status == "revoked"),
+            func.coalesce(func.sum(NameBonusClaim.bonus_days), 0),
+            func.coalesce(func.sum(NameBonusClaim.reclaimed_seconds), 0),
+        )
+    )
+    total, users, monitoring, revoked, granted_days, reclaimed_seconds = result.one()
+    return {
+        "total_claims": total,
+        "users": users,
+        "monitoring": monitoring,
+        "revoked": revoked,
+        "granted_days": granted_days,
+        "reclaimed_seconds": reclaimed_seconds,
+    }
