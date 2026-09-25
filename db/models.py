@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger, Index, text
 from sqlalchemy.orm import relationship, DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.sql import expression, func
@@ -132,6 +132,31 @@ class Payment(Base):
     user = relationship("User", back_populates="payments")
     promo_code_used = relationship("PromoCode",
                                    back_populates="payments_where_used")
+
+
+class NameBonusClaim(Base):
+    __tablename__ = "name_bonus_claims"
+    __table_args__ = (
+        Index(
+            "uq_name_bonus_active_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id = Column(Integer, nullable=False)
+    granted_at = Column(DateTime(timezone=True), nullable=False)
+    monitor_until = Column(DateTime(timezone=True), nullable=False)
+    bonus_days = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, default="active", index=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    reclaimed_seconds = Column(Integer, nullable=False, default=0)
+    panel_sync_pending = Column(Boolean, nullable=False, default=True)
+    notification_pending = Column(Boolean, nullable=False, default=False)
 
 
 class UserBilling(Base):

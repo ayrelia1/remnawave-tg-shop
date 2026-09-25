@@ -26,12 +26,13 @@ from db.models import (  # noqa: E402
     AdCampaign,
     CampaignAccrual,
     CurrencyRate,
+    NameBonusClaim,
     Payment,
     PartnerPayout,
 )
 
 MIGRATIONS = REPO_ROOT / "alembic" / "versions"
-HEAD = "0008_attribution_is_new_user"
+HEAD = "0009_name_bonus_claims"
 
 
 @pytest.fixture(scope="module")
@@ -236,6 +237,16 @@ def test_is_new_user_backfill_uses_the_registration_timestamp():
     assert "DELETE FROM campaign_accruals" in module.PRUNE_ACCRUALS_SQL
     assert "a.is_new_user = FALSE" in module.PRUNE_ACCRUALS_SQL
     assert "a.ad_campaign_id = ca.ad_campaign_id" in module.PRUNE_ACCRUALS_SQL
+
+
+def test_name_bonus_claim_columns_match_the_model():
+    created = _captured_tables(_load("0009_name_bonus_claims"), "upgrade")
+    columns = {column.name: column for column in created["name_bonus_claims"]}
+    model_columns = {column.name: column for column in NameBonusClaim.__table__.columns}
+    assert set(columns) == set(model_columns)
+    for name, column in columns.items():
+        assert type(column.type) is type(model_columns[name].type), name
+        assert column.nullable == model_columns[name].nullable, name
 
 
 def test_campaign_type_backfills_existing_rows_as_ad():

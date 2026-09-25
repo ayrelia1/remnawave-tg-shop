@@ -30,6 +30,7 @@ from bot.middlewares.i18n import get_i18n_instance
 from bot.services.panel_api_service import PanelApiService
 from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
+from bot.services.name_bonus_service import NameBonusService
 from bot.utils.message_queue import init_queue_manager
 from config.logging_config import setup_logging
 
@@ -63,6 +64,7 @@ async def run_scheduler():
     panel_service = PanelApiService(settings)
 
     backup_service = BackupService(bot, settings, notification_service)
+    name_bonus_service = NameBonusService(settings, bot, panel_service, i18n)
 
     scheduler = AsyncIOScheduler()
 
@@ -124,6 +126,20 @@ async def run_scheduler():
             "Scheduler: auto-sync job registered (every %d hours)",
             settings.AUTO_SYNC_INTERVAL_HOURS,
         )
+
+    # Existing claims remain monitored even if new claims are disabled.
+    async def job_name_bonus():
+        await name_bonus_service.run_checks(session_factory)
+
+    scheduler.add_job(
+        job_name_bonus,
+        IntervalTrigger(minutes=30),
+        id="name_bonus",
+        name="Telegram name bonus checks",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+    )
 
     scheduler.start()
     logging.info("Scheduler: all jobs started, running until interrupted")
