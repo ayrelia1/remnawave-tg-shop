@@ -89,6 +89,11 @@ def get_stats_monitoring_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
         icon_custom_emoji_id=PREMIUM_EMOJI_STATS,
     )
     builder.button(
+        text=_(key="admin_name_bonus_check_button"),
+        callback_data="admin_action:check_name_bonus",
+        icon_custom_emoji_id=PREMIUM_EMOJI_REFRESH,
+    )
+    builder.button(
         text=_(key="admin_view_payments_button"),
         callback_data="admin_action:view_payments",
         icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
@@ -104,7 +109,7 @@ def get_stats_monitoring_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
         callback_data="admin_action:main",
         icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
-    builder.adjust(2, 1, 1)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 

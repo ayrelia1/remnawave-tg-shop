@@ -133,7 +133,7 @@ async def run_scheduler():
 
     scheduler.add_job(
         job_name_bonus,
-        IntervalTrigger(minutes=30),
+        IntervalTrigger(minutes=5),
         id="name_bonus",
         name="Telegram name bonus checks",
         replace_existing=True,

@@ -3,6 +3,7 @@ import logging
 from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramAPIError
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from bot.middlewares.i18n import JsonI18n
 from bot.services.panel_api_service import PanelApiService
 from bot.services.subscription_service import SubscriptionService
 from bot.services.backup_service import BackupService
+from bot.services.name_bonus_service import NameBonusService
 from bot.utils.message_queue import get_queue_manager
 from bot.constants.premium_emoji import PREMIUM_EMOJI_BACK
 
@@ -30,6 +32,7 @@ from . import sync_admin as admin_sync_handlers
 from . import logs_admin as admin_logs_handlers
 
 router = Router(name="admin_common_router")
+_name_bonus_check_task: Optional[asyncio.Task] = None
 
 
 @router.message(Command("admin"))
@@ -58,6 +61,7 @@ async def admin_panel_actions_callback_handler(
         callback: types.CallbackQuery, state: FSMContext, settings: Settings,
         i18n_data: dict, bot: Bot, panel_service: PanelApiService,
         subscription_service: SubscriptionService, session: AsyncSession,
+        async_session_factory,
         backup_service: Optional[BackupService] = None):
     action_parts = callback.data.split(":")
     action = action_parts[1]
@@ -81,6 +85,16 @@ async def admin_panel_actions_callback_handler(
     if action == "stats":
         await admin_stats_handlers.show_statistics_handler(
             callback, i18n_data, settings, session)
+    elif action == "check_name_bonus":
+        if not _start_name_bonus_check(
+            settings, bot, panel_service, i18n, async_session_factory,
+            callback.from_user.id,
+            _("admin_name_bonus_check_finished"),
+            _("admin_name_bonus_check_failed"),
+        ):
+            await callback.answer(_("admin_name_bonus_check_running"), show_alert=True)
+            return
+        await callback.answer(_("admin_name_bonus_check_started"), show_alert=True)
     elif action == "broadcast":
         await admin_broadcast_handlers.broadcast_message_prompt_handler(
             callback, state, i18n_data, settings, session)
@@ -182,6 +196,52 @@ async def admin_panel_actions_callback_handler(
             f"Unknown admin_action received: {action} from callback {callback.data}"
         )
         await callback.answer(_("admin_unknown_action"), show_alert=True)
+
+
+def _start_name_bonus_check(
+    settings: Settings,
+    bot: Bot,
+    panel_service: PanelApiService,
+    i18n: JsonI18n,
+    session_factory,
+    admin_id: int,
+    finished_text: str,
+    failed_text: str,
+) -> bool:
+    global _name_bonus_check_task
+    if _name_bonus_check_task is not None and not _name_bonus_check_task.done():
+        return False
+    _name_bonus_check_task = asyncio.create_task(
+        _run_name_bonus_check_and_notify(
+            settings, bot, panel_service, i18n, session_factory,
+            admin_id, finished_text, failed_text,
+        )
+    )
+    return True
+
+
+async def _run_name_bonus_check_and_notify(
+    settings: Settings,
+    bot: Bot,
+    panel_service: PanelApiService,
+    i18n: JsonI18n,
+    session_factory,
+    admin_id: int,
+    finished_text: str,
+    failed_text: str,
+) -> None:
+    try:
+        service = NameBonusService(settings, bot, panel_service, i18n)
+        await service.run_checks(session_factory)
+    except Exception:
+        logging.exception("Manual name bonus check failed")
+        result_text = failed_text
+    else:
+        result_text = finished_text
+    try:
+        await bot.send_message(admin_id, result_text)
+    except TelegramAPIError:
+        logging.warning("Could not notify admin %s about name bonus check", admin_id, exc_info=True)
 
 
 @router.callback_query(F.data.startswith("admin_section:"))
