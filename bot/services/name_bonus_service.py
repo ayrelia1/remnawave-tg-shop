@@ -1,7 +1,6 @@
 """Claim and monitor the Telegram first-name bonus for previous buyers."""
 
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
@@ -15,7 +14,7 @@ from bot.services.subscription_service import SubscriptionService
 
 BONUS_DAYS = 5
 COOLDOWN_DAYS = 30
-NAME_PATTERN = re.compile(r"mansur\s*vpn", re.IGNORECASE)
+NAME_TAG = "@MansurVPN_bot"
 
 
 def as_utc(value: datetime) -> datetime:
@@ -23,7 +22,7 @@ def as_utc(value: datetime) -> datetime:
 
 
 def matches_name(first_name: str | None) -> bool:
-    return bool(first_name and NAME_PATTERN.search(first_name))
+    return bool(first_name and NAME_TAG.casefold() in first_name.casefold())
 
 
 @dataclass(frozen=True)

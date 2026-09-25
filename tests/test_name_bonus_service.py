@@ -25,7 +25,7 @@ from db.models import Base, NameBonusClaim, Payment, Subscription, User
 
 
 class FakeBot:
-    def __init__(self, first_name="Alice Mansur VPN"):
+    def __init__(self, first_name="Alice @MansurVpn_bot"):
         self.first_name = first_name
         self.messages = []
 
@@ -100,20 +100,19 @@ async def seed_user(session, *, payment=True, active=True):
 
 
 @pytest.mark.parametrize("first_name", [
-    "Mansur VPN Alice",
-    "Alice Mansur VPN",
-    "Alice mAnSuR vPn Bob",
-    "MANSURVPN",
-    "Alice mansurvpn",
-    "Alice Mansur   VPN",
+    "@mansurvpn_bot Alice",
     "Alice @mansurvpn_bot",
+    "Alice @MansurVpn_bot",
+    "Alice @MANSURVPN_BOT Bob",
 ])
-def test_name_accepts_brand_anywhere_and_in_any_case(first_name):
+def test_name_accepts_tag_anywhere_and_in_any_case(first_name):
     assert matches_name(first_name)
 
 
-@pytest.mark.parametrize("first_name", [None, "", "Alice", "Mansur", "VPN", "Man sur VPN"])
-def test_name_rejects_missing_brand(first_name):
+@pytest.mark.parametrize("first_name", [
+    None, "", "Alice", "Mansur VPN", "MansurVPN", "mansurvpn_bot", "@mansurvpn",
+])
+def test_name_rejects_missing_tag(first_name):
     assert not matches_name(first_name)
 
 
@@ -148,8 +147,7 @@ def test_task_keyboards_and_labels():
     assert task_list.inline_keyboard[1][0].callback_data == "main_action:back_to_main"
     assert task_detail.inline_keyboard[0][0].callback_data == "name_bonus:claim"
     assert task_detail.inline_keyboard[1][0].callback_data == "tasks:menu"
-    assert "Mansur VPN" in i18n.gettext("ru", "name_bonus_task_description")
-    assert "MansurVPN" in i18n.gettext("ru", "name_bonus_task_description")
+    assert "@MansurVPN_bot" in i18n.gettext("ru", "name_bonus_task_description")
 
 
 @pytest.mark.asyncio
@@ -221,15 +219,15 @@ async def test_paid_user_can_claim_once_then_wait_30_days(db_session_factory):
 
 
 @pytest.mark.asyncio
-async def test_changing_brand_case_and_position_does_not_revoke_bonus(db_session_factory):
-    bot = FakeBot("Alice Mansur VPN")
+async def test_changing_tag_case_and_position_does_not_revoke_bonus(db_session_factory):
+    bot = FakeBot("Alice @mansurvpn_bot")
     service = make_service(bot=bot)
     async with db_session_factory() as session:
         await seed_user(session)
         result = await service.claim(session, 123)
         assert result.status == "granted"
 
-    bot.first_name = "MANSURVPN Alice"
+    bot.first_name = "@MANSURVPN_BOT Alice"
     await service.run_checks(db_session_factory)
 
     async with db_session_factory() as session:
@@ -321,7 +319,7 @@ async def test_removed_name_reclaims_only_unelapsed_bonus(db_session_factory):
     )
     assert abs((panel_expiry - as_utc(after)).total_seconds()) < 0.01
 
-    bot.first_name = "MansurVPN Alice"
+    bot.first_name = "@mansurvpn_bot Alice"
     async with db_session_factory() as session:
         again = await service.claim(session, 123)
     assert again.status == "cooldown"
