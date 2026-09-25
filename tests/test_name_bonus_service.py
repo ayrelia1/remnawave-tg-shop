@@ -104,15 +104,18 @@ async def seed_user(session, *, payment=True, active=True):
     "Alice @mansurvpn_bot",
     "Alice @MansurVpn_bot",
     "Alice @MANSURVPN_BOT Bob",
+    "Mansur VPN Alice",
+    "Alice Mansur VPN",
+    "Alice mAnSuR vPn Bob",
 ])
-def test_name_accepts_tag_anywhere_and_in_any_case(first_name):
+def test_name_accepts_either_variant_anywhere_and_in_any_case(first_name):
     assert matches_name(first_name)
 
 
 @pytest.mark.parametrize("first_name", [
-    None, "", "Alice", "Mansur VPN", "MansurVPN", "mansurvpn_bot", "@mansurvpn",
+    None, "", "Alice", "MansurVPN", "mansurvpn_bot", "@mansurvpn", "Mansur VNP",
 ])
-def test_name_rejects_missing_tag(first_name):
+def test_name_rejects_missing_variant(first_name):
     assert not matches_name(first_name)
 
 
@@ -142,12 +145,14 @@ def test_task_keyboards_and_labels():
     assert i18n.gettext("en", "tasks_button") == "Tasks"
     task_list = get_tasks_keyboard("ru", i18n)
     task_detail = get_name_bonus_task_keyboard("ru", i18n)
-    assert task_list.inline_keyboard[0][0].text == "5 дней за имя Telegram"
+    assert task_list.inline_keyboard[0][0].text == "7 дней за имя Telegram"
     assert task_list.inline_keyboard[0][0].callback_data == "tasks:name_bonus"
     assert task_list.inline_keyboard[1][0].callback_data == "main_action:back_to_main"
     assert task_detail.inline_keyboard[0][0].callback_data == "name_bonus:claim"
     assert task_detail.inline_keyboard[1][0].callback_data == "tasks:menu"
-    assert "@MansurVPN_bot" in i18n.gettext("ru", "name_bonus_task_description")
+    task_description = i18n.gettext("ru", "name_bonus_task_description")
+    assert "<code>@MansurVPN_BOT</code>" in task_description
+    assert "<code>Mansur VPN</code>" in task_description
 
 
 @pytest.mark.asyncio
@@ -214,12 +219,24 @@ async def test_paid_user_can_claim_once_then_wait_30_days(db_session_factory):
     assert first.status == "granted" and first.panel_synced
     assert second.status == "cooldown" and second.next_at > datetime.now(timezone.utc)
     assert len(claims) == 1
-    assert abs(((after - before) - timedelta(days=5)).total_seconds()) < 1
+    assert claims[0].bonus_days == 7
+    monitor_window = as_utc(claims[0].monitor_until) - as_utc(claims[0].granted_at)
+    assert abs((monitor_window - timedelta(days=7)).total_seconds()) < 1
+    assert abs(((after - before) - timedelta(days=7)).total_seconds()) < 1
     assert service.panel_service.updates[-1][1]["status"] == "ACTIVE"
 
 
 @pytest.mark.asyncio
-async def test_changing_tag_case_and_position_does_not_revoke_bonus(db_session_factory):
+async def test_phrase_can_claim_bonus(db_session_factory):
+    service = make_service(bot=FakeBot("Alice Mansur VPN"))
+    async with db_session_factory() as session:
+        await seed_user(session)
+        result = await service.claim(session, 123)
+    assert result.status == "granted"
+
+
+@pytest.mark.asyncio
+async def test_switching_from_tag_to_phrase_does_not_revoke_bonus(db_session_factory):
     bot = FakeBot("Alice @mansurvpn_bot")
     service = make_service(bot=bot)
     async with db_session_factory() as session:
@@ -227,7 +244,7 @@ async def test_changing_tag_case_and_position_does_not_revoke_bonus(db_session_f
         result = await service.claim(session, 123)
         assert result.status == "granted"
 
-    bot.first_name = "@MANSURVPN_BOT Alice"
+    bot.first_name = "MANSUR VPN Alice"
     await service.run_checks(db_session_factory)
 
     async with db_session_factory() as session:
@@ -251,7 +268,7 @@ async def test_prior_purchase_can_open_bonus_access_after_expiry(db_session_fact
     assert result.status == "granted"
     assert subscription.duration_months == 0
     assert subscription.is_active
-    assert as_utc(subscription.end_date) > datetime.now(timezone.utc) + timedelta(days=4)
+    assert as_utc(subscription.end_date) > datetime.now(timezone.utc) + timedelta(days=6)
 
 
 @pytest.mark.asyncio
@@ -274,7 +291,7 @@ async def test_relinked_active_subscription_keeps_paid_time(db_session_factory, 
 
     assert result.status == "granted"
     assert subscription.duration_months == 1
-    assert abs(((as_utc(subscription.end_date) - before) - timedelta(days=5)).total_seconds()) < 1
+    assert abs(((as_utc(subscription.end_date) - before) - timedelta(days=7)).total_seconds()) < 1
 
 
 @pytest.mark.asyncio
@@ -298,7 +315,7 @@ async def test_removed_name_reclaims_only_unelapsed_bonus(db_session_factory):
         assert result.status == "granted"
         claim = (await session.execute(select(NameBonusClaim))).scalar_one()
         before = (await session.execute(select(Subscription))).scalar_one().end_date
-        claim.granted_at = datetime.now(timezone.utc) - timedelta(days=3)
+        claim.granted_at = datetime.now(timezone.utc) - timedelta(days=5)
         claim.monitor_until = datetime.now(timezone.utc) + timedelta(days=2)
         await session.commit()
 
@@ -384,7 +401,9 @@ async def test_name_change_after_monitoring_window_keeps_bonus(db_session_factor
         await seed_user(session)
         await service.claim(session, 123)
         claim = (await session.execute(select(NameBonusClaim))).scalar_one()
-        claim.monitor_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+        claim.bonus_days = 5  # Existing five-day claims keep their original window.
+        claim.granted_at = datetime.now(timezone.utc) - timedelta(days=5, seconds=1)
+        claim.monitor_until = claim.granted_at + timedelta(days=5)
         await session.commit()
     bot.first_name = "Alice"
     await service.run_checks(db_session_factory)
@@ -417,7 +436,7 @@ async def test_bonus_statistics_count_claims_and_reclaimed_time(db_session_facto
         session.add_all([
             NameBonusClaim(
                 user_id=123, subscription_id=1, granted_at=now,
-                monitor_until=now + timedelta(days=5), bonus_days=5,
+                monitor_until=now + timedelta(days=7), bonus_days=7,
                 status="active", reclaimed_seconds=0,
             ),
             NameBonusClaim(
@@ -440,7 +459,7 @@ async def test_bonus_statistics_count_claims_and_reclaimed_time(db_session_facto
     }
     assert stats == {
         "total_claims": 3, "users": 2, "monitoring": 1,
-        "revoked": 1, "granted_days": 15, "reclaimed_seconds": 2 * 86400,
+        "revoked": 1, "granted_days": 17, "reclaimed_seconds": 2 * 86400,
     }
 
 
@@ -478,7 +497,7 @@ async def test_claim_sends_admin_notice_in_users_topic(monkeypatch):
     assert len(notices) == 1
     assert "Получен бонус за имя" in notices[0][0]
     assert "alice" in notices[0][0]
-    assert "5 дн." in notices[0][0]
+    assert "7 дн." in notices[0][0]
     assert notices[0][1] == 88
     assert notices[0][2].inline_keyboard[0][0].url == "tg://user?id=123"
     assert "2026-10-01 00:00 UTC" in notices[0][0]
@@ -560,7 +579,7 @@ async def test_admin_statistics_displays_bonus_totals(db_session_factory, monkey
     async with db_session_factory() as session:
         session.add(NameBonusClaim(
             user_id=123, subscription_id=1, granted_at=now,
-            monitor_until=now + timedelta(days=5), bonus_days=5,
+            monitor_until=now + timedelta(days=7), bonus_days=7,
             status="active", reclaimed_seconds=0,
         ))
         await session.commit()

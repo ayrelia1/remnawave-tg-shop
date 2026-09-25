@@ -12,9 +12,10 @@ from db.dal import name_bonus_dal, subscription_dal, user_dal
 from bot.services.subscription_service import SubscriptionService
 
 
-BONUS_DAYS = 5
+BONUS_DAYS = 7
 COOLDOWN_DAYS = 30
-NAME_TAG = "@MansurVPN_bot"
+NAME_TAG = "@MansurVPN_BOT"
+NAME_PHRASE = "Mansur VPN"
 
 
 def as_utc(value: datetime) -> datetime:
@@ -22,7 +23,10 @@ def as_utc(value: datetime) -> datetime:
 
 
 def matches_name(first_name: str | None) -> bool:
-    return bool(first_name and NAME_TAG.casefold() in first_name.casefold())
+    if not first_name:
+        return False
+    name = first_name.casefold()
+    return NAME_TAG.casefold() in name or NAME_PHRASE.casefold() in name
 
 
 @dataclass(frozen=True)

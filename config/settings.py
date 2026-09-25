@@ -308,7 +308,7 @@ class Settings(BaseSettings):
 
     NAME_BONUS_ENABLED: bool = Field(
         default=False,
-        description="Enable the five-day Telegram first-name bonus after any successful purchase",
+        description="Enable the seven-day Telegram first-name bonus after any successful purchase",
     )
 
     CRYPT4_ENABLED: bool = Field(default=False, description="Enable happ crypt4 encryption for subscription URLs")
