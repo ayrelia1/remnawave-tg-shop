@@ -14,6 +14,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -490,13 +491,38 @@ async def test_underpayment_cancels_instead_of_activating(webhook_env):
     assert webhook_env["status_writes"] == [(PAYMENT_ID, "invoice-uuid-1", "canceled")]
 
 
-async def test_cancelled_invoice_is_marked_canceled(webhook_env):
+async def test_cancelled_invoice_is_marked_canceled_without_notifying_user(webhook_env, monkeypatch):
     service = _service()
+    service.bot.send_message = AsyncMock()
+    commit = AsyncMock()
+    monkeypatch.setattr(_FakeSession, "commit", commit)
 
-    response = await service.webhook_route(_FakeRequest(_signed_webhook(status="cancel")))
+    for _ in range(2):
+        response = await service.webhook_route(_FakeRequest(_signed_webhook(status="cancel")))
+        assert response.status == 200
+        assert response.text == "ok_canceled"
+
+    assert webhook_env["status_writes"] == [(PAYMENT_ID, "invoice-uuid-1", "canceled")] * 2
+    assert webhook_env["activated"] == []
+    assert commit.await_count == 2
+    service.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["fail", "system_fail", "wrong_amount", "locked", "refund_process", "refund_fail", "refund_paid"],
+)
+async def test_failed_invoice_still_notifies_user(webhook_env, status):
+    service = _service()
+    service.bot.send_message = AsyncMock()
+
+    response = await service.webhook_route(_FakeRequest(_signed_webhook(status=status)))
 
     assert response.status == 200
+    assert response.text == "ok_canceled"
     assert webhook_env["status_writes"] == [(PAYMENT_ID, "invoice-uuid-1", "canceled")]
+    assert webhook_env["activated"] == []
+    service.bot.send_message.assert_awaited_once_with(111, "payment_failed")
 
 
 async def test_forged_callback_is_rejected(webhook_env):

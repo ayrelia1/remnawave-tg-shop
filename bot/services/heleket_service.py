@@ -407,6 +407,9 @@ class HeleketService:
                     )
                     return web.Response(status=500, text="processing_error")
 
+                if status == "cancel":
+                    return web.Response(text="ok_canceled")
+
                 db_user = await user_dal.get_user_by_id(session, payment.user_id)
                 lang = (
                     db_user.language_code

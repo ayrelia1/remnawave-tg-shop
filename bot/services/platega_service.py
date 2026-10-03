@@ -423,6 +423,9 @@ class PlategaService:
                     logging.error("Platega webhook: failed to cancel payment %s: %s", transaction_id, exc)
                     return web.Response(status=500, text="processing_error")
 
+                if status in {"CANCELED", "CANCELLED"}:
+                    return web.Response(text="ok_canceled")
+
                 db_user = await user_dal.get_user_by_id(session, payment.user_id)
                 lang = db_user.language_code if db_user and db_user.language_code else self.settings.DEFAULT_LANGUAGE
                 _ = lambda k, **kw: self.i18n.gettext(lang, k, **kw) if self.i18n else k

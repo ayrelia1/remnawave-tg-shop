@@ -588,13 +588,6 @@ async def process_cancelled_payment(session: AsyncSession, bot: Bot,
                 f"Could not find payment record {payment_db_id} to update status to cancelled for user {user_id}."
             )
 
-        db_user = await user_dal.get_user_by_id(session, user_id)
-        user_lang = settings.DEFAULT_LANGUAGE
-        if db_user and db_user.language_code: user_lang = db_user.language_code
-
-        _ = lambda key, **kwargs: i18n.gettext(user_lang, key, **kwargs)
-        await bot.send_message(user_id, _("payment_failed"))
-
     except Exception as e_process_cancel:
         logging.error(
             f"Error processing cancelled payment for user {user_id}, payment_db_id {payment_db_id}: {e_process_cancel}",

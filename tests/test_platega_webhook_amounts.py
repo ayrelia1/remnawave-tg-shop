@@ -8,6 +8,7 @@ it means the customer paid and got nothing. Only an underpayment is refused.
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -218,3 +219,33 @@ async def test_bad_auth_headers_are_rejected(service, marked_calls):
 
     assert response.status == 403
     assert marked_calls == []
+
+
+@pytest.mark.parametrize(
+    "status, should_notify",
+    [("CANCELED", False), ("CANCELLED", False), ("CHARGEBACK", True), ("CHARGEBACKED", True)],
+)
+async def test_cancellation_is_silent_but_chargeback_still_notifies(
+    service, marked_calls, monkeypatch, status, should_notify
+):
+    service.bot.send_message = AsyncMock()
+    update_status = AsyncMock()
+    commit = AsyncMock()
+    monkeypatch.setattr(payment_dal, "update_provider_payment_and_status", update_status)
+    monkeypatch.setattr(_FakeSession, "commit", commit)
+
+    for _ in range(2):
+        response = await service.webhook_route(_FakeRequest({"id": "tx-1", "status": status}))
+        assert response.status == 200
+        assert response.text == "ok_canceled"
+
+    assert update_status.await_count == 2
+    for status_call in update_status.await_args_list:
+        assert status_call.args[1:] == (7, "tx-1", "canceled")
+    assert commit.await_count == 2
+    assert marked_calls == []
+    if should_notify:
+        assert service.bot.send_message.await_count == 2
+        service.bot.send_message.assert_awaited_with(111, "payment_failed")
+    else:
+        service.bot.send_message.assert_not_awaited()
