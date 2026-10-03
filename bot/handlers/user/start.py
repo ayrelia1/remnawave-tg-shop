@@ -13,6 +13,8 @@ from db.dal import user_dal
 from db.models import User
 
 from bot.keyboards.inline.user_keyboards import (
+    CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK,
+    CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX,
     get_main_menu_inline_keyboard,
     get_language_selection_keyboard,
     get_channel_subscription_keyboard,
@@ -37,7 +39,8 @@ async def send_main_menu(target_event: Union[types.Message,
                          subscription_service: SubscriptionService,
                          session: AsyncSession,
                          is_edit: bool = False,
-                         panel_service=None):
+                         panel_service=None,
+                         welcome_menu: bool = False):
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
 
@@ -148,7 +151,8 @@ async def send_main_menu(target_event: Union[types.Message,
     reply_markup = get_main_menu_inline_keyboard(current_lang, i18n, settings,
                                                  show_trial_button_in_menu,
                                                  connect_url=connect_url,
-                                                 use_mini_app=use_mini_app)
+                                                 use_mini_app=use_mini_app,
+                                                 welcome_menu=welcome_menu)
 
     target_message_obj: Optional[types.Message] = None
     if isinstance(target_event, types.Message):
@@ -189,7 +193,8 @@ async def ensure_required_channel_subscription(
         i18n: Optional[JsonI18n],
         current_lang: str,
         session: AsyncSession,
-        db_user: Optional[User] = None) -> bool:
+        db_user: Optional[User] = None,
+        welcome_menu: bool = False) -> bool:
     """
     Verify that the user is a member of the required channel (if configured).
     Returns True when access can proceed, False when user must subscribe first.
@@ -337,7 +342,8 @@ async def ensure_required_channel_subscription(
         return True
 
     keyboard = (get_channel_subscription_keyboard(
-        current_lang, i18n, settings.REQUIRED_CHANNEL_LINK
+        current_lang, i18n, settings.REQUIRED_CHANNEL_LINK,
+        welcome_channel_id=required_channel_id if welcome_menu else None,
     )
                if i18n else None)
 
@@ -566,7 +572,8 @@ async def start_command_handler(message: types.Message,
 
     if not await ensure_required_channel_subscription(message, settings, i18n,
                                                       current_lang, session,
-                                                      db_user):
+                                                      db_user,
+                                                      welcome_menu=registered_now):
         return
 
     # Auto-apply promo code if provided via start parameter
@@ -665,10 +672,14 @@ async def start_command_handler(message: types.Message,
                          subscription_service,
                          session,
                          is_edit=False,
-                         panel_service=panel_service)
+                         panel_service=panel_service,
+                         welcome_menu=registered_now)
 
 
-@router.callback_query(F.data == "channel_subscription:verify")
+@router.callback_query(
+    (F.data == CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK)
+    | F.data.startswith(CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX)
+)
 async def verify_channel_subscription_callback(
         callback: types.CallbackQuery,
         settings: Settings,
@@ -681,8 +692,22 @@ async def verify_channel_subscription_callback(
 
     db_user = await user_dal.get_user_by_id(session, callback.from_user.id)
 
+    # The registration prompt carries the welcome across restarts. A completed
+    # channel check consumes it; prompts for another channel cannot revive it.
+    welcome_menu = bool(
+        settings.REQUIRED_CHANNEL_SUBSCRIBE_TO_USE
+        and settings.REQUIRED_CHANNEL_ID
+        and callback.data == f"{CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX}{settings.REQUIRED_CHANNEL_ID}"
+        and db_user
+        and not (
+            db_user.channel_subscription_verified
+            and db_user.channel_subscription_verified_for == settings.REQUIRED_CHANNEL_ID
+        )
+    )
+
     verified = await ensure_required_channel_subscription(
-        callback, settings, i18n, current_lang, session, db_user)
+        callback, settings, i18n, current_lang, session, db_user,
+        welcome_menu=welcome_menu)
     if not verified:
         return
 
@@ -707,7 +732,8 @@ async def verify_channel_subscription_callback(
                          subscription_service,
                          session,
                          is_edit=bool(callback.message),
-                         panel_service=panel_service)
+                         panel_service=panel_service,
+                         welcome_menu=welcome_menu)
 
 
 @router.message(Command("language"))

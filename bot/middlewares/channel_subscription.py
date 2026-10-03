@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.settings import Settings
 from db.dal import user_dal
 from bot.middlewares.i18n import JsonI18n
-from bot.keyboards.inline.user_keyboards import get_channel_subscription_keyboard
+from bot.keyboards.inline.user_keyboards import (
+    CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK,
+    CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX,
+    get_channel_subscription_keyboard,
+)
 
 
 class ChannelSubscriptionMiddleware(BaseMiddleware):
@@ -47,7 +51,10 @@ class ChannelSubscriptionMiddleware(BaseMiddleware):
         if (
             callback_query
             and callback_query.data
-            and callback_query.data == "channel_subscription:verify"
+            and (
+                callback_query.data == CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK
+                or callback_query.data.startswith(CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX)
+            )
         ):
             return await handler(event, data)
 

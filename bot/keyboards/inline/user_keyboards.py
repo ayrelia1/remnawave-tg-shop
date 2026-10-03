@@ -31,17 +31,24 @@ from bot.constants.premium_emoji import (
 )
 
 
+CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK = "channel_subscription:verify"
+CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX = f"{CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK}:welcome:"
+
+
 def get_main_menu_inline_keyboard(
         lang: str,
         i18n_instance,
         settings: Settings,
         show_trial_button: bool = False,
         connect_url: Optional[str] = None,
-        use_mini_app: bool = False) -> InlineKeyboardMarkup:
+        use_mini_app: bool = False,
+        welcome_menu: bool = False) -> InlineKeyboardMarkup:
+    """Use only trial and purchase actions for a trial-eligible first welcome."""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
+    show_welcome_menu = welcome_menu and show_trial_button and settings.TRIAL_ENABLED
 
-    if use_mini_app and settings.SUBSCRIPTION_MINI_APP_URL:
+    if not show_welcome_menu and use_mini_app and settings.SUBSCRIPTION_MINI_APP_URL:
         builder.row(
             InlineKeyboardButton(
                 text=_("connect_button"),
@@ -49,7 +56,7 @@ def get_main_menu_inline_keyboard(
                 icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
             )
         )
-    elif connect_url:
+    elif not show_welcome_menu and connect_url:
         builder.row(
             InlineKeyboardButton(
                 text=_("connect_button"),
@@ -74,6 +81,9 @@ def get_main_menu_inline_keyboard(
             icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
         )
     )
+    if show_welcome_menu:
+        return builder.as_markup()
+
     builder.row(
         InlineKeyboardButton(
             text=_(key="menu_my_subscription_inline"),
@@ -661,7 +671,8 @@ def get_channel_subscription_keyboard(
         lang: str,
         i18n_instance,
         channel_link: Optional[str],
-        include_check_button: bool = True) -> Optional[InlineKeyboardMarkup]:
+        include_check_button: bool = True,
+        welcome_channel_id: Optional[int] = None) -> Optional[InlineKeyboardMarkup]:
     """
     Return keyboard with buttons to open the required channel and trigger a subscription re-check.
     """
@@ -684,7 +695,11 @@ def get_channel_subscription_keyboard(
     if include_check_button:
         builder.button(
             text=_(key="channel_subscription_verify_button"),
-            callback_data="channel_subscription:verify",
+            callback_data=(
+                f"{CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX}{welcome_channel_id}"
+                if welcome_channel_id is not None
+                else CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK
+            ),
             icon_custom_emoji_id=PREMIUM_EMOJI_EYES,
         )
         has_buttons = True
