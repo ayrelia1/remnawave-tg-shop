@@ -371,8 +371,11 @@ class Pay2328Service:
 
                 if status in PENDING_STATUSES:
                     if payment.status in {"pending_2328", "pending_2328_unknown"}:
-                        if not payment.provider_payment_id or payment.status == "pending_2328_unknown":
-                            await payment_dal.update_provider_payment_and_status(session, payment.payment_id, invoice_uuid, "pending_2328")
+                        if not payment.provider_payment_id:
+                            # An event identifies the invoice but does not restore its lost checkout URL.
+                            await payment_dal.update_provider_payment_and_status(
+                                session, payment.payment_id, invoice_uuid, payment.status,
+                            )
                             await session.commit()
                     return web.Response(text="ok_pending")
 

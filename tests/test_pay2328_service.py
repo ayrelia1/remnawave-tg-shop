@@ -896,3 +896,37 @@ async def test_unknown_attempt_reuse_is_scoped_to_the_same_user_and_offer():
                 assert await payment_dal.get_unconfirmed_provider_payment(session, **(query | changed)) is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.parametrize("status", ["check", "awaiting_confirmation", "underpaid_check"])
+async def test_pending_webhook_preserves_recovery_of_lost_creation_response(status):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from db.models import Base, User, Payment
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            session.add(User(user_id=111))
+            session.add(Payment(
+                payment_id=7, user_id=111, provider="2328", amount=129.0,
+                currency="RUB", status="pending_2328_unknown",
+                subscription_duration_months=1,
+            ))
+            await session.commit()
+        service = _service()
+        service.async_session_factory = sessions
+        response = await service.webhook_route(_FakeRequest(_signed_webhook(payment_status=status)))
+        assert response.status == 200
+        async with sessions() as session:
+            retry = await payment_dal.get_unconfirmed_provider_payment(
+                session, user_id=111, provider="2328", amount=129.0,
+                currency="RUB", months=1, device_limit=None,
+            )
+            assert retry is not None, "A pending event does not recover the lost checkout URL"
+            assert retry.payment_id == 7
+            assert retry.provider_payment_id == "invoice-uuid-1"
+    finally:
+        await engine.dispose()
