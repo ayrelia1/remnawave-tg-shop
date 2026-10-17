@@ -37,7 +37,7 @@ POST /webhook/telegram → Aiogram dispatcher → Middlewares → Router → Han
 
 **Webhook endpoints** (all handled by aiohttp in `bot/app/web/`):
 - `/webhook/telegram` — Telegram updates
-- `/webhook/yookassa`, `/webhook/freekassa`, `/webhook/platega`, `/webhook/cispay`, `/webhook/severpay`, `/webhook/heleket`, `/webhook/cryptopay` — payment provider callbacks
+- `/webhook/yookassa`, `/webhook/freekassa`, `/webhook/platega`, `/webhook/cispay`, `/webhook/severpay`, `/webhook/2328`, `/webhook/cryptopay` — payment provider callbacks
 - `/webhook/panel` — Remnawave panel events
 
 ## Code Structure
@@ -89,7 +89,7 @@ A currency with no configured rate leaves `base_amount`/`fx_rate` NULL rather th
 
 Payouts (`partner_payouts`, admin-recorded, cascade-deleted with the campaign) are normalised the same way at entry, so `balance = SUM(earned_amount) - SUM(payouts.base_amount)`. `PARTNER_MIN_PAYOUT` is display-only — withdrawals go through support. Partners open their cabinet with `/partner`; every callback re-checks `campaign.partner_user_id == from_user.id` via `_owned_campaign`. Deleting a partner user detaches and deactivates the label instead of removing it.
 
-Out of the box only Stars are non-RUB: YooKassa/FreeKassa/Platega/cisPay/SeverPay write `RUB`, Heleket hardcodes `RUB` (`HELEKET_TO_CURRENCY` only picks the coin Heleket settles in, it never reaches the ledger), and CryptoPay writes `CRYPTOPAY_ASSET`, which is `RUB` under the default `CRYPTOPAY_CURRENCY_TYPE=fiat`.
+Out of the box only Stars are non-RUB: YooKassa/FreeKassa/Platega/cisPay/SeverPay write `RUB`, 2328 hardcodes `RUB` (`PAY2328_TO_CURRENCY` and `PAY2328_NETWORK` optionally preselect the payer direction and never change the ledger currency), and CryptoPay writes `CRYPTOPAY_ASSET`, which is `RUB` under the default `CRYPTOPAY_CURRENCY_TYPE=fiat`.
 
 
 ## Payment Providers
@@ -100,7 +100,7 @@ Eight providers are supported, each toggled by `{PROVIDER}_ENABLED=true` in .env
 - **Platega** — Russian QR/cards/crypto
 - **cisPay** — backup SBP checkout, shown as “СБП #2”
 - **SeverPay** — Russian processor
-- **Heleket** — crypto checkout
+- **2328** — crypto checkout
 - **CryptoPay** — Telegram crypto wallet
 - **Telegram Stars** — Native Telegram currency (no external provider)
 

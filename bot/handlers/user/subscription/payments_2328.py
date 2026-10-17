@@ -8,11 +8,11 @@ from bot.keyboards.inline.user_keyboards import get_payment_url_keyboard
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import safe_edit_text
 from bot.services.panel_api_service import PanelApiService
-from bot.services.heleket_service import HeleketService
+from bot.services.pay2328_service import Pay2328Service
 from config.settings import Settings
 from db.dal import payment_dal
 
-router = Router(name="user_subscription_payments_heleket_router")
+router = Router(name="user_subscription_payments_pay2328_router")
 
 
 from bot.handlers.user.subscription.payments_subscription import (
@@ -23,12 +23,12 @@ from bot.handlers.user.subscription.payments_subscription import (
 )
 
 
-@router.callback_query(F.data.startswith("pay_heleket:"))
-async def pay_heleket_callback_handler(
+@router.callback_query(F.data.startswith("pay_2328:"))
+async def pay_2328_callback_handler(
     callback: types.CallbackQuery,
     settings: Settings,
     i18n_data: dict,
-    heleket_service: HeleketService,
+    pay2328_service: Pay2328Service,
     panel_service: PanelApiService,
     session: AsyncSession,
     promo_code_service=None,
@@ -41,22 +41,22 @@ async def pay_heleket_callback_handler(
         try:
             await callback.answer(get_text("error_occurred_try_again"), show_alert=True)
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         return
 
     if not await ensure_panel_available_or_alert(callback, get_text, panel_service):
         return
 
-    if not heleket_service or not heleket_service.configured:
-        logging.error("Heleket service is not configured or unavailable.")
+    if not pay2328_service or not pay2328_service.configured:
+        logging.error("2328 service is not configured or unavailable.")
         try:
             await callback.answer(get_text("payment_service_unavailable_alert"), show_alert=True)
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         try:
             await safe_edit_text(callback.message, get_text("payment_service_unavailable"))
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         return
 
     try:
@@ -66,11 +66,11 @@ async def pay_heleket_callback_handler(
             raise ValueError("bad offer payload")
         devices, months, callback_price_rub, sale_mode = parsed
     except (ValueError, IndexError):
-        logging.error(f"Invalid pay_heleket data in callback: {callback.data}")
+        logging.error(f"Invalid pay_2328 data in callback: {callback.data}")
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         return
 
     user_id = callback.from_user.id
@@ -85,7 +85,7 @@ async def pay_heleket_callback_handler(
     )
     if resolved_price_rub is None:
         logging.warning(
-            "Heleket: no server-side price for user %s, value=%s, mode=%s",
+            "2328: no server-side price for user %s, value=%s, mode=%s",
             user_id,
             months,
             sale_mode,
@@ -93,12 +93,12 @@ async def pay_heleket_callback_handler(
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         return
 
     if abs(resolved_price_rub - callback_price_rub) > 0.01:
         logging.warning(
-            "Heleket: callback price mismatch for user %s, value=%s, mode=%s, callback=%.2f, resolved=%.2f",
+            "2328: callback price mismatch for user %s, value=%s, mode=%s, callback=%.2f, resolved=%.2f",
             user_id,
             months,
             sale_mode,
@@ -108,7 +108,7 @@ async def pay_heleket_callback_handler(
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         return
 
     price_rub = resolved_price_rub
@@ -128,62 +128,74 @@ async def pay_heleket_callback_handler(
         "original_amount": None,
         "discount_applied": None,
         "currency": currency_code,
-        "status": "pending_heleket",
+        "status": "pending_2328",
         "description": payment_description,
         "subscription_duration_months": int(months),
-        "provider": "heleket",
+        "provider": "2328",
         "promo_code_id": None,
         "hwid_device_limit": devices if sale_mode != "traffic" else None,
     }
 
     try:
-        payment_record = await payment_dal.create_payment_record(session, payment_record_payload)
+        payment_record = await payment_dal.get_unconfirmed_provider_payment(
+            session, user_id=user_id, provider="2328", amount=price_rub,
+            currency=currency_code, months=int(months),
+            device_limit=payment_record_payload["hwid_device_limit"],
+        )
+        is_retry = payment_record is not None
+        if not payment_record:
+            payment_record = await payment_dal.create_payment_record(session, payment_record_payload)
         await session.commit()
     except Exception as e_db_create:
         await session.rollback()
         logging.error(
-            f"Heleket: failed to create payment record for user {user_id}: {e_db_create}",
+            f"2328: failed to create payment record for user {user_id}: {e_db_create}",
             exc_info=True,
         )
         try:
             await safe_edit_text(callback.message, get_text("error_creating_payment_record"))
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
         except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+            logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
         return
 
-    success, response_data = await heleket_service.create_invoice(
+    success, response_data = await pay2328_service.create_invoice(
         payment_db_id=payment_record.payment_id,
         user_id=user_id,
         months=months,
         amount=price_rub,
         currency=currency_code,
-        description=payment_description,
-        promo_code_service=promo_code_service,
+        description=payment_record.description or payment_description,
+        promo_code_service=None if is_retry else promo_code_service,
         session=session,
     )
 
     if success:
         invoice_uuid = response_data.get("uuid")
         payment_url = response_data.get("url")
-        provider_status = response_data.get("payment_status", payment_record.status)
 
         if invoice_uuid and payment_url:
             try:
-                await payment_dal.update_provider_payment_and_status(
-                    session,
-                    payment_record.payment_id,
-                    str(invoice_uuid),
-                    str(provider_status),
+                # A fast webhook can settle the payment before this response is saved.
+                current = await payment_dal.get_payment_by_db_id(
+                    session, payment_record.payment_id, for_update=True,
                 )
+                if current and current.provider == "2328" and current.status in {
+                    "pending_2328", "pending_2328_unknown",
+                }:
+                    if current.provider_payment_id and current.provider_payment_id != str(invoice_uuid):
+                        raise ValueError("2328 invoice identity mismatch")
+                    await payment_dal.update_provider_payment_and_status(
+                        session, current.payment_id, str(invoice_uuid), "pending_2328",
+                    )
                 await session.commit()
             except Exception as e_status:
                 await session.rollback()
                 logging.error(
-                    f"Heleket: failed to store invoice uuid for payment {payment_record.payment_id}: {e_status}",
+                    f"2328: failed to store invoice uuid for payment {payment_record.payment_id}: {e_status}",
                     exc_info=True,
                 )
 
@@ -206,7 +218,7 @@ async def pay_heleket_callback_handler(
                     disable_web_page_preview=False,
                 )
             except Exception as e_edit:
-                logging.warning(f"Heleket: failed to display payment link ({e_edit}), sending new message.")
+                logging.warning(f"2328: failed to display payment link ({e_edit}), sending new message.")
                 try:
                     await callback.message.answer(
                         message_text,
@@ -220,38 +232,42 @@ async def pay_heleket_callback_handler(
                         disable_web_page_preview=False,
                     )
                 except Exception as exc:
-                    logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+                    logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
             try:
                 await callback.answer()
             except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+                logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
             return
 
         logging.error(
-            "Heleket: invoice created but missing uuid or payment link for payment %s. Response: %s",
+            "2328: invoice created but missing uuid or payment link for payment %s",
             payment_record.payment_id,
-            response_data,
         )
 
     try:
-        await payment_dal.update_payment_status_by_db_id(
-            session,
-            payment_record.payment_id,
-            "failed_creation",
+        current = await payment_dal.get_payment_by_db_id(
+            session, payment_record.payment_id, for_update=True,
         )
+        if current and current.provider == "2328" and current.status in {
+            "pending_2328", "pending_2328_unknown",
+        }:
+            await payment_dal.update_payment_status_by_db_id(
+                session, current.payment_id,
+                "pending_2328_unknown" if response_data.get("uncertain") else "failed_creation",
+            )
         await session.commit()
     except Exception as e_status:
         await session.rollback()
         logging.error(
-            f"Heleket: failed to mark payment {payment_record.payment_id} as failed_creation: {e_status}",
+            f"2328: failed to mark payment {payment_record.payment_id} as failed_creation: {e_status}",
             exc_info=True,
         )
 
     try:
         await safe_edit_text(callback.message, get_text("error_payment_gateway"))
     except Exception as exc:
-        logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+        logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)
     try:
         await callback.answer(get_text("error_payment_gateway"), show_alert=True)
     except Exception as exc:
-        logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_heleket.py: %s", exc)
+        logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_2328.py: %s", exc)

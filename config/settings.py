@@ -147,30 +147,44 @@ class Settings(BaseSettings):
     CISPAY_RETURN_URL: Optional[str] = Field(default=None)
     CISPAY_FAILED_URL: Optional[str] = Field(default=None)
 
-    HELEKET_ENABLED: bool = Field(default=False)
-    HELEKET_MERCHANT_ID: Optional[str] = Field(
-        default=None, description="Heleket merchant UUID (Dashboard -> Settings)"
+    PAY2328_ENABLED: bool = Field(default=False)
+    PAY2328_PROJECT_ID: Optional[str] = Field(
+        default=None, description="2328 project UUID from the project settings"
     )
-    HELEKET_API_KEY: Optional[str] = Field(
+    PAY2328_API_KEY: Optional[str] = Field(
         default=None,
-        description="Heleket *payment* API key. The payout key will not work here.",
+        description="2328 payment API key (not the Payout API key).",
     )
-    HELEKET_BASE_URL: str = Field(default="https://api.heleket.com")
-    HELEKET_TO_CURRENCY: Optional[str] = Field(
+    PAY2328_BASE_URL: str = Field(default="https://api.2328.io/api")
+    PAY2328_TO_CURRENCY: Optional[str] = Field(
         default=None,
         description=(
-            "Optional crypto ticker to settle the invoice in (e.g. USDT). "
-            "Left empty, the payer picks any coin Heleket offers."
+            "Optional preselected cryptocurrency (e.g. USDT); requires PAY2328_NETWORK. "
+            "Leave both empty to let the payer choose on the hosted checkout."
         ),
     )
-    HELEKET_LIFETIME_SECONDS: int = Field(
+    PAY2328_NETWORK: Optional[str] = Field(default=None)
+    PAY2328_TTL_SECONDS: int = Field(
         default=3600,
         ge=300,
-        le=43200,
-        description="Invoice validity window; Heleket allows 300..43200 seconds.",
+        le=86400,
+        description="Invoice validity window; 2328 allows 300..86400 seconds.",
     )
-    HELEKET_RETURN_URL: Optional[str] = Field(default=None)
-    HELEKET_SUCCESS_URL: Optional[str] = Field(default=None)
+    PAY2328_RETURN_URL: Optional[str] = Field(default=None)
+    PAY2328_SUCCESS_URL: Optional[str] = Field(default=None)
+
+    @field_validator('PAY2328_TO_CURRENCY', 'PAY2328_NETWORK', mode='before')
+    @classmethod
+    def normalize_pay2328_direction(cls, value):
+        if isinstance(value, str):
+            return value.strip().upper() or None
+        return value
+
+    @model_validator(mode='after')
+    def validate_pay2328_direction(self):
+        if bool(self.PAY2328_TO_CURRENCY) != bool(self.PAY2328_NETWORK):
+            raise ValueError("PAY2328_TO_CURRENCY and PAY2328_NETWORK must be set together")
+        return self
 
     FREEKASSA_ENABLED: bool = Field(default=False)
     FREEKASSA_MERCHANT_ID: Optional[str] = None
@@ -199,7 +213,7 @@ class Settings(BaseSettings):
     )
     PAYMENT_METHODS_ORDER: Optional[str] = Field(
         default=None,
-        description="Comma-separated list of payment methods to show (e.g., platega,cispay,yookassa,stars,heleket,cryptopay)",
+        description="Comma-separated list of payment methods to show (e.g., platega,cispay,yookassa,stars,2328,cryptopay)",
     )
 
     MONTH_1_ENABLED: bool = Field(default=True, alias="1_MONTH_ENABLED")
@@ -492,15 +506,15 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def heleket_webhook_path(self) -> str:
-        return "/webhook/heleket"
+    def pay2328_webhook_path(self) -> str:
+        return "/webhook/2328"
 
     @computed_field
     @property
-    def heleket_full_webhook_url(self) -> Optional[str]:
+    def pay2328_full_webhook_url(self) -> Optional[str]:
         base = self.WEBHOOK_BASE_URL
         if base:
-            return f"{base.rstrip('/')}{self.heleket_webhook_path}"
+            return f"{base.rstrip('/')}{self.pay2328_webhook_path}"
         return None
 
     @computed_field
@@ -791,7 +805,7 @@ class Settings(BaseSettings):
             "severpay",
             "yookassa",
             "stars",
-            "heleket",
+            "2328",
             "cryptopay",
         ]
         if not self.PAYMENT_METHODS_ORDER:
@@ -873,8 +887,8 @@ class Settings(BaseSettings):
 
     @field_validator(
         'REQUIRED_CHANNEL_LINK',
-        'HELEKET_RETURN_URL',
-        'HELEKET_SUCCESS_URL',
+        'PAY2328_RETURN_URL',
+        'PAY2328_SUCCESS_URL',
         'PLATEGA_RETURN_URL',
         'PLATEGA_FAILED_URL',
         'CISPAY_RETURN_URL',
@@ -1066,17 +1080,17 @@ def get_settings() -> Settings:
                     logging.warning(
                         "CRITICAL: cisPay is enabled but merchant credentials (CISPAY_SHOP_ID/CISPAY_API_KEY) are missing. cisPay payments will not work."
                     )
-            if _settings_instance.HELEKET_ENABLED:
+            if _settings_instance.PAY2328_ENABLED:
                 if (
-                    not _settings_instance.HELEKET_MERCHANT_ID
-                    or not _settings_instance.HELEKET_API_KEY
+                    not _settings_instance.PAY2328_PROJECT_ID
+                    or not _settings_instance.PAY2328_API_KEY
                 ):
                     logging.warning(
-                        "CRITICAL: Heleket is enabled but HELEKET_MERCHANT_ID/HELEKET_API_KEY are missing. Heleket payments will not work."
+                        "CRITICAL: 2328 is enabled but PAY2328_PROJECT_ID/PAY2328_API_KEY are missing. 2328 payments will not work."
                     )
                 if not _settings_instance.WEBHOOK_BASE_URL:
                     logging.warning(
-                        "CRITICAL: Heleket is enabled but WEBHOOK_BASE_URL is not set. Heleket cannot deliver payment callbacks, so subscriptions will never activate."
+                        "CRITICAL: 2328 is enabled but WEBHOOK_BASE_URL is not set. 2328 cannot deliver payment callbacks, so subscriptions will never activate."
                     )
             if _settings_instance.SEVERPAY_ENABLED:
                 if not _settings_instance.SEVERPAY_MID or not _settings_instance.SEVERPAY_TOKEN:

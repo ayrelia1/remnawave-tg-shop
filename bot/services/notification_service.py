@@ -256,7 +256,7 @@ class NotificationService:
             "stars": "⭐",
             "platega": "💳",
             "cispay": "💳",
-            "heleket": "₿",
+            "2328": "₿",
             "severpay": "💳",
         }.get(payment_provider.lower(), "💰")
 

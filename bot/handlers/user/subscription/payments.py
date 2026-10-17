@@ -2,7 +2,7 @@ from aiogram import Router
 
 from .payments_crypto import router as crypto_router
 from .payments_freekassa import router as freekassa_router
-from .payments_heleket import router as heleket_router
+from .payments_2328 import router as pay2328_router
 from .payments_platega import router as platega_router
 from .payments_cispay import router as cispay_router
 from .payments_severpay import router as severpay_router
@@ -19,7 +19,7 @@ router.include_router(platega_router)
 router.include_router(cispay_router)
 router.include_router(severpay_router)
 router.include_router(crypto_router)
-router.include_router(heleket_router)
+router.include_router(pay2328_router)
 router.include_router(stars_router)
 
 __all__ = ["router"]

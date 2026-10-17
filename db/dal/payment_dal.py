@@ -170,10 +170,36 @@ async def ensure_payment_with_provider_id(
 
 
 async def get_payment_by_db_id(session: AsyncSession,
-                               payment_db_id: int) -> Optional[Payment]:
+                               payment_db_id: int,
+                               *, for_update: bool = False) -> Optional[Payment]:
 
     stmt = select(Payment).where(Payment.payment_id == payment_db_id).options(
         selectinload(Payment.user), selectinload(Payment.promo_code_used))
+    if for_update:
+        # Refresh an existing identity-map entry after waiting for another webhook.
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def get_unconfirmed_provider_payment(
+        session: AsyncSession, *, user_id: int, provider: str, amount: float,
+        currency: str, months: int, device_limit: Optional[int]) -> Optional[Payment]:
+    """Reuse an identical attempt whose upstream creation result is unknown."""
+    stmt = (
+        select(Payment)
+        .where(
+            Payment.user_id == user_id,
+            Payment.provider == provider,
+            Payment.status == f"pending_{provider}_unknown",
+            Payment.amount == amount,
+            Payment.currency == currency,
+            Payment.subscription_duration_months == months,
+            Payment.hwid_device_limit == device_limit,
+        )
+        .order_by(Payment.payment_id.desc())
+        .limit(1)
+    )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 

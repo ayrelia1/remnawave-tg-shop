@@ -433,10 +433,14 @@ def get_payment_method_keyboard(months: int, price: float,
                 callback_data=f"pay_stars:{value_str}:{stars_price}{mode_suffix}",
                 icon_custom_emoji_id=PREMIUM_EMOJI_STAR,
             )
-        elif method == "heleket" and settings.HELEKET_ENABLED:
+        elif (
+            method == "2328" and settings.PAY2328_ENABLED
+            and settings.PAY2328_PROJECT_ID and settings.PAY2328_API_KEY
+            and settings.pay2328_full_webhook_url
+        ):
             builder.button(
-                text=_("pay_with_heleket_button"),
-                callback_data=f"pay_heleket:{value_str}:{price}{mode_suffix}",
+                text=_("pay_with_2328_button"),
+                callback_data=f"pay_2328:{value_str}:{price}{mode_suffix}",
                 icon_custom_emoji_id=PREMIUM_EMOJI_CRYPTO,
             )
         elif method == "cryptopay" and settings.CRYPTOPAY_ENABLED:

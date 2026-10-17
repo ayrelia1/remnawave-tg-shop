@@ -13,7 +13,7 @@ from bot.services.stars_service import StarsService
 from bot.services.crypto_pay_service import CryptoPayService
 from bot.services.panel_webhook_service import PanelWebhookService
 from bot.services.freekassa_service import FreeKassaService
-from bot.services.heleket_service import HeleketService
+from bot.services.pay2328_service import Pay2328Service
 from bot.services.platega_service import PlategaService
 from bot.services.cispay_service import CisPayService
 from bot.services.severpay_service import SeverPayService
@@ -53,7 +53,7 @@ def build_core_services(
         subscription_service=subscription_service,
         referral_service=referral_service,
     )
-    heleket_service = HeleketService(
+    pay2328_service = Pay2328Service(
         bot=bot,
         settings=settings,
         i18n=i18n,
@@ -123,7 +123,7 @@ def build_core_services(
         "stars_service": stars_service,
         "cryptopay_service": cryptopay_service,
         "freekassa_service": freekassa_service,
-        "heleket_service": heleket_service,
+        "pay2328_service": pay2328_service,
         "panel_webhook_service": panel_webhook_service,
         "yookassa_service": yookassa_service,
         "lknpd_service": lknpd_service,
