@@ -1,5 +1,6 @@
 import logging
 from typing import Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 from config.settings import Settings
 from bot.services.panel_api_service import PanelApiService
@@ -18,7 +19,9 @@ async def prepare_config_links(settings: Settings, raw_link: Optional[str]) -> T
     """
     Build the user-facing connection key and the URL for the connect button.
 
-    Returns (display_link, button_link). When CRYPT4 is enabled the display link
+    Returns (display_link, button_link). SUBSCRIPTION_DOMAIN replaces the origin
+    while preserving the panel-issued path, query, and fragment before encryption.
+    When CRYPT4 is enabled the display link
     is encrypted and prefixed with happ://crypt4/ by panel API, and the button link is wrapped
     with CRYPT4_REDIRECT_URL if provided.
     """
@@ -28,6 +31,18 @@ async def prepare_config_links(settings: Settings, raw_link: Optional[str]) -> T
     cleaned = raw_link.strip()
     if not cleaned:
         return None, None
+
+    subscription_domain = getattr(settings, "SUBSCRIPTION_DOMAIN", None)
+    if subscription_domain:
+        try:
+            panel_url = urlsplit(cleaned)
+            if panel_url.scheme not in ("http", "https") or not panel_url.hostname:
+                raise ValueError("Invalid panel subscription URL")
+        except ValueError:
+            logging.error("Cannot apply SUBSCRIPTION_DOMAIN: the panel returned an invalid subscription URL.")
+            return None, None
+        domain = urlsplit(subscription_domain)
+        cleaned = urlunsplit(panel_url._replace(scheme=domain.scheme, netloc=domain.netloc))
 
     display_link = cleaned
     button_link = cleaned

@@ -1,6 +1,6 @@
 import logging
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, ValidationError, computed_field, field_validator, model_validator
+from pydantic import Field, HttpUrl, ValidationError, computed_field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 
 # Canonical month durations for device-based subscription tiers.
@@ -305,6 +305,10 @@ class Settings(BaseSettings):
 
     PANEL_API_URL: Optional[str] = None
     PANEL_API_KEY: Optional[str] = None
+    SUBSCRIPTION_DOMAIN: Optional[str] = Field(
+        default=None,
+        description="Optional HTTP(S) origin for subscription links; preserves the panel-issued path and key",
+    )
     USER_TRAFFIC_LIMIT_GB: Optional[float] = Field(default=0.0)
     USER_TRAFFIC_STRATEGY: str = Field(default="NO_RESET")
     USER_SQUAD_UUIDS: Optional[str] = Field(
@@ -841,6 +845,28 @@ class Settings(BaseSettings):
         default=False,
         description="Hide admin-generated events from admin logs UI and CSV export",
     )
+
+    @field_validator('SUBSCRIPTION_DOMAIN', mode='before')
+    @classmethod
+    def normalize_subscription_domain(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+        domain = HttpUrl(value)
+        if (
+            domain.username is not None
+            or domain.password is not None
+            or domain.path not in (None, "", "/")
+            or domain.query is not None
+            or domain.fragment is not None
+        ):
+            raise ValueError(
+                "SUBSCRIPTION_DOMAIN must contain only an HTTP(S) scheme and host, with an optional port"
+            )
+        return str(domain).rstrip("/")
 
     @field_validator('LOG_LEVEL', mode='before')
     @classmethod

@@ -201,11 +201,19 @@
     | --- | --- |
     | `PANEL_API_URL` | URL API вашей панели Remnawave. |
     | `PANEL_API_KEY` | API ключ для доступа к панели. |
+    | `SUBSCRIPTION_DOMAIN` | Optional subscription domain, e.g. `https://domain.com`. Leave empty to use the panel-issued URL. |
     | `PANEL_WEBHOOK_SECRET`| Секретный ключ для проверки вебхуков от панели. |
     | `USER_SQUAD_UUIDS` | ID отрядов для новых пользователей. |
     | `USER_EXTERNAL_SQUAD_UUID` | Опционально. UUID внешнего отряда (External Squad) из [документации Remnawave](https://docs.rw/api), куда автоматически добавляются новые пользователи. |
     | `USER_TRAFFIC_LIMIT_GB`| Лимит трафика в ГБ (0 - безлимит). |
     | `USER_HWID_DEVICE_LIMIT`| Лимит устройств (HWID) для новых пользователей (0 - безлимит). |
+
+    Set `SUBSCRIPTION_DOMAIN=https://domain.com` to serve subscription pages through a separate domain or CDN.
+    The bot replaces only the scheme and host: `https://panel.example/sub/KEY?client=happ` becomes
+    `https://domain.com/sub/KEY?client=happ`. The panel-issued path, key, query, and fragment are preserved.
+    Use an HTTP(S) origin with an optional port and no credentials, path, query, or fragment; a trailing `/` is accepted.
+    The CDN must serve the same paths. Rewriting happens before CRYPT4 encryption and does not change `PANEL_API_URL`
+    or a configured `SUBSCRIPTION_MINI_APP_URL`. Restart the bot after changing this value; clear it and restart to roll back.
 
     > Раздел "Мои устройства" становится доступен пользователям только при включении `MY_DEVICES_SECTION_ENABLED`. Значение лимита устройств при создании записей в панели берётся из `USER_HWID_DEVICE_LIMIT`.
     </details>
