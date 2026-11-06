@@ -180,7 +180,7 @@ baselines, with `preview`, `applied`, `already_managed`, `needs_review` or
 `error` outcomes. A nonzero exit code means errors/review items remain.
 
 The allowance for an active subscription is
-`max(10 GiB, 50 GiB * remaining_seconds / (30 * 86400))`, rounded down to
+`max(10 GiB, 75 GiB * remaining_seconds / (30 * 86400))`, rounded down to
 whole bytes once. Partial days count; duration/device count do not multiply
 the allowance. The latest active, unexpired subscription in the bot database
 supplies the remaining time. Expired/unsubscribed users receive zero. Users

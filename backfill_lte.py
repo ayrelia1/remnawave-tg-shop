@@ -39,7 +39,7 @@ class TransferResult:
 
 
 def allowance_for_expiry(end_date: datetime | None, at: datetime) -> int:
-    """Prorate 50 GiB per 30 days, with a 10 GiB minimum while unexpired."""
+    """Prorate 75 GiB per 30 days, with a 10 GiB minimum while unexpired."""
     if end_date is None:
         return 0
     remaining = as_utc(end_date) - as_utc(at)
@@ -47,7 +47,7 @@ def allowance_for_expiry(end_date: datetime | None, at: datetime) -> int:
                        + remaining.microseconds)
     if not microseconds:
         return 0
-    amount = max(10 * GIB, 50 * GIB * microseconds // (30 * 86400 * 1_000_000))
+    amount = max(10 * GIB, 75 * GIB * microseconds // (30 * 86400 * 1_000_000))
     if amount > 2**63 - 1:
         raise ValueError("Allowance is too large")
     return amount

@@ -36,15 +36,16 @@ async def legacy():
     await engine.dispose()
 
 
-def test_proration_is_50_divided_by_30_with_a_10_gib_minimum_for_active_subscriptions():
+def test_proration_is_75_divided_by_30_with_a_10_gib_minimum_for_active_subscriptions():
     now = datetime.now(timezone.utc)
-    assert allowance_for_expiry(now + timedelta(days=30), now) == 50 * GIB
-    assert allowance_for_expiry(now + timedelta(days=45), now) == 75 * GIB
+    assert allowance_for_expiry(now + timedelta(days=30), now) == 75 * GIB
+    assert allowance_for_expiry(now + timedelta(days=45), now) == 225 * GIB // 2
     assert allowance_for_expiry(now + timedelta(hours=12), now) == 10 * GIB
     assert allowance_for_expiry(now + timedelta(microseconds=1), now) == 10 * GIB
-    assert allowance_for_expiry(now + timedelta(days=6), now) == 10 * GIB
-    assert allowance_for_expiry(now + timedelta(days=7), now) == 50 * GIB * 7 // 30
-    assert allowance_for_expiry(now + timedelta(days=6, hours=12), now) == 50 * GIB * 13 // 60
+    assert allowance_for_expiry(now + timedelta(days=4), now) == 10 * GIB
+    assert allowance_for_expiry(now + timedelta(days=6), now) == 15 * GIB
+    assert allowance_for_expiry(now + timedelta(days=7), now) == 75 * GIB * 7 // 30
+    assert allowance_for_expiry(now + timedelta(days=6, hours=12), now) == 75 * GIB * 13 // 60
     assert allowance_for_expiry(now, now) == 0
     assert allowance_for_expiry(now - timedelta(seconds=1), now) == 0
     assert allowance_for_expiry(None, now) == 0
@@ -85,7 +86,7 @@ async def test_preview_does_not_grant_or_enable_or_set_a_baseline(legacy):
     async with legacy.factory() as session:
         result = await transfer_user(session, legacy.panel, 1, legacy.now, apply=False)
         assert result.status == "preview"
-        assert result.allowance_bytes == 75 * GIB
+        assert result.allowance_bytes == 225 * GIB // 2
         assert result.panel_counter == 800 * GIB
         await session.commit()
     async with legacy.factory() as session:
@@ -105,7 +106,7 @@ async def test_apply_baselines_old_usage_and_rerun_cannot_grant_twice(legacy):
         assert again.status == "already_managed"
         account = await session.get(LteAccount, 1)
         assert account.managed
-        assert account.credited_bytes == 75 * GIB
+        assert account.credited_bytes == 225 * GIB // 2
         assert account.used_bytes == 0
         assert account.last_panel_counter == 800 * GIB
         assert account.panel_user_ref == "42"
@@ -121,7 +122,7 @@ async def test_new_managed_default_on_empty_import_still_receives_the_one_time_g
         result = await transfer_user(session, legacy.panel, 1, legacy.now, apply=True)
         await session.commit()
         assert result.status == "applied"
-        assert (await session.get(LteAccount, 1)).remaining_bytes == 75 * GIB
+        assert (await session.get(LteAccount, 1)).remaining_bytes == 225 * GIB // 2
 
 
 async def test_controller_charges_only_new_traffic_after_transfer(legacy):
@@ -135,8 +136,8 @@ async def test_controller_charges_only_new_traffic_after_transfer(legacy):
         await LteService(settings, legacy.panel).reconcile(session, 1)
         account = await session.get(LteAccount, 1)
         assert account.used_bytes == 2 * GIB
-        assert account.remaining_bytes == 73 * GIB
-    legacy.panel.update_user_details_on_panel.assert_awaited_once_with("42", {"description": "73 ГБ"})
+        assert account.remaining_bytes == 221 * GIB // 2
+    legacy.panel.update_user_details_on_panel.assert_awaited_once_with("42", {"description": "110.5 ГБ"})
 
 
 async def test_existing_topups_are_preserved_in_addition_to_prorated_days(legacy):
@@ -151,7 +152,7 @@ async def test_existing_topups_are_preserved_in_addition_to_prorated_days(legacy
         await session.commit()
         await transfer_user(session, legacy.panel, 1, legacy.now, apply=True)
         await session.commit()
-        assert (await session.get(LteAccount, 1)).remaining_bytes == 100 * GIB
+        assert (await session.get(LteAccount, 1)).remaining_bytes == 275 * GIB // 2
 
 
 @pytest.mark.parametrize("source", ["payment:plan", "trial:subscription"])
