@@ -249,6 +249,8 @@ class Settings(BaseSettings):
     TARIFF_SWITCH_DOWNGRADE_ENABLED: bool = Field(default=True)
 
     PANEL_WEBHOOK_SECRET: Optional[str] = Field(default=None)
+    TORRENT_BLOCKER_NOTIFICATIONS_ENABLED: bool = Field(
+        default=False, description="Notify subscription owners about torrent_blocker.report IP blocks")
     LIMITER_WEBHOOK_SECRET: Optional[str] = Field(
         default=None, description="Shared HMAC secret for remnawave-limiter; empty disables the integration")
     LIMITER_CHAT_THREAD_ID: Optional[int] = Field(

@@ -878,6 +878,16 @@ class PanelApiService:
                 return resp
         return None
 
+    async def get_hosts(self) -> Optional[List[Dict[str, Any]]]:
+        """Read the host catalog used to match torrent report inbounds."""
+        response = await self._request("GET", "/hosts", log_full_response=False)
+        self._raise_if_transient(response, "Read host catalog")
+        if response and not response.get("error"):
+            hosts = response.get("response")
+            if isinstance(hosts, list) and all(isinstance(host, dict) for host in hosts):
+                return hosts
+        return None
+
     async def encrypt_happ_link(self, link_to_encrypt: str) -> Optional[str]:
         """Encrypt a subscription link using the panel's happ crypt4 API.
 

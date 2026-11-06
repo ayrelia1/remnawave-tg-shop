@@ -697,5 +697,7 @@
   "limiter_measure_asn": "групп по ASN-провайдерам",
   "log_limiter_action": "::warn:: <b>Лимитер · предупреждение {number}/3</b>\n\n::user:: {user_display}\nTelegram ID: <code>{user_id}</code>\nID в панели: <code>{panel_user_ref}</code>\n\n::lock:: {action}\n::laptop:: Лимит устройств: <b>{device_limit}</b>\nОбнаружено: <b>{device_count} {measure}</b>; всего IP-адресов: <b>{ip_count}</b>.\n\n::clock:: {timestamp}",
   "log_limiter_reset_action": "Подписка сброшена: ключи обновлены, HWID очищены.",
-  "log_limiter_disabled_action": "Пользователь отключён в панели (DISABLED)."
+  "log_limiter_disabled_action": "Пользователь отключён в панели (DISABLED).",
+  "torrent_blocked_notification": "::warn:: <b>Блокировка за торрент-трафик</b>\n\nВаш IP-адрес <code>{ip}</code> был заблокирован на сервере <b>{server_name}</b> на <b>{seconds} секунд</b>.\n\nИспользование торрентов на этом сервере запрещено. Остановите торрент-клиент перед повторным подключением.",
+  "torrent_blocked_indefinite_notification": "::warn:: <b>Блокировка за торрент-трафик</b>\n\nВаш IP-адрес <code>{ip}</code> был заблокирован на сервере <b>{server_name}</b> без автоматической разблокировки.\n\nИспользование торрентов на этом сервере запрещено. Остановите торрент-клиент и обратитесь в поддержку."
 }

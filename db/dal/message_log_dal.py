@@ -7,6 +7,16 @@ from sqlalchemy import func, or_
 from ..models import MessageLog, User
 
 
+async def has_event_marker(session: AsyncSession, user_id: int, event_type: str, marker: str) -> bool:
+    """Check a marker; delivery code must recheck under the owner's row lock."""
+    stmt = select(MessageLog.log_id).where(
+        MessageLog.user_id == user_id,
+        MessageLog.event_type == event_type,
+        MessageLog.raw_update_preview == marker,
+    ).limit(1)
+    return await session.scalar(stmt) is not None
+
+
 async def create_message_log(session: AsyncSession,
                              log_data: dict) -> Optional[MessageLog]:
 

@@ -696,5 +696,7 @@
   "limiter_measure_asn": "ASN provider groups",
   "log_limiter_action": "::warn:: <b>Limiter · warning {number}/3</b>\n\n::user:: {user_display}\nTelegram ID: <code>{user_id}</code>\nPanel ID: <code>{panel_user_ref}</code>\n\n::lock:: {action}\n::laptop:: Device limit: <b>{device_limit}</b>\nDetected: <b>{device_count} {measure}</b>; total IP addresses: <b>{ip_count}</b>.\n\n::clock:: {timestamp}",
   "log_limiter_reset_action": "Subscription reset: credentials rotated and HWID devices cleared.",
-  "log_limiter_disabled_action": "Panel user disabled (DISABLED)."
+  "log_limiter_disabled_action": "Panel user disabled (DISABLED).",
+  "torrent_blocked_notification": "::warn:: <b>Torrent traffic block</b>\n\nYour IP address <code>{ip}</code> was blocked on server <b>{server_name}</b> for <b>{seconds} seconds</b>.\n\nTorrents are prohibited on this server. Stop your torrent client before reconnecting.",
+  "torrent_blocked_indefinite_notification": "::warn:: <b>Torrent traffic block</b>\n\nYour IP address <code>{ip}</code> was blocked on server <b>{server_name}</b> without automatic unblocking.\n\nTorrents are prohibited on this server. Stop your torrent client and contact support."
 }

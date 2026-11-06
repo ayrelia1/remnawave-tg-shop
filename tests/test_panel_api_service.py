@@ -15,6 +15,30 @@ from bot.services.panel_api_service import (
 from tests.conftest import RecordingPanelApiService, api_error, empty_body, ok, panel_user
 
 
+async def test_get_hosts_reads_complete_catalog(panel_settings):
+    hosts = [{"uuid": "host-1", "remark": "Germany"}]
+    panel = RecordingPanelApiService(panel_settings, [ok(hosts)])
+    assert await panel.get_hosts() == hosts
+    assert panel.last_call[:2] == ("GET", "/hosts")
+
+
+async def test_get_hosts_accepts_empty_catalog(panel_settings):
+    panel = RecordingPanelApiService(panel_settings, [ok([])])
+    assert await panel.get_hosts() == []
+
+
+async def test_get_hosts_raises_on_outage(panel_settings):
+    panel = RecordingPanelApiService(panel_settings, [api_error(503)])
+    with pytest.raises(PanelUnavailableError):
+        await panel.get_hosts()
+
+
+@pytest.mark.parametrize("response", [api_error(403), None, ok({"hosts": []}), ok([None])])
+async def test_get_hosts_does_not_treat_failed_or_malformed_catalog_as_empty(panel_settings, response):
+    panel = RecordingPanelApiService(panel_settings, [response])
+    assert await panel.get_hosts() is None
+
+
 # --------------------------------------------------------------------------
 # Identity helpers
 # --------------------------------------------------------------------------

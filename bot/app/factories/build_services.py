@@ -12,6 +12,7 @@ from bot.services.promo_code_service import PromoCodeService
 from bot.services.stars_service import StarsService
 from bot.services.crypto_pay_service import CryptoPayService
 from bot.services.panel_webhook_service import PanelWebhookService
+from bot.services.torrent_blocker_service import TorrentBlockerService
 from bot.services.freekassa_service import FreeKassaService
 from bot.services.pay2328_service import Pay2328Service
 from bot.services.platega_service import PlategaService
@@ -90,7 +91,11 @@ def build_core_services(
         referral_service=referral_service,
         default_return_url=bot_username_for_default_return,
     )
-    panel_webhook_service = PanelWebhookService(bot, settings, i18n, async_session_factory, panel_service, notification_service)
+    torrent_blocker_service = TorrentBlockerService(bot, settings, i18n, async_session_factory, panel_service)
+    panel_webhook_service = PanelWebhookService(
+        bot, settings, i18n, async_session_factory, panel_service, notification_service,
+        torrent_blocker_service=torrent_blocker_service,
+    )
     yookassa_service = YooKassaService(
         shop_id=settings.YOOKASSA_SHOP_ID,
         secret_key=settings.YOOKASSA_SECRET_KEY,

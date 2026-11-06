@@ -8,9 +8,11 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.text_decorations import html_decoration as hd
 from sqlalchemy.orm import sessionmaker
 from typing import Optional
+from pydantic import ValidationError
 from config.settings import Settings
 from .panel_api_service import PanelApiService
 from .notification_service import NotificationService
+from .torrent_blocker_service import TorrentBlockerService, TORRENT_REPORT_EVENT
 from bot.middlewares.i18n import JsonI18n
 from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup, get_autorenew_cancel_keyboard
 from db.dal import user_dal
@@ -67,13 +69,15 @@ def expiration_bucket(hours: int) -> tuple[str, int]:
     return direction, days
 
 class PanelWebhookService:
-    def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService, notification_service: NotificationService):
+    def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService, notification_service: NotificationService,
+                 *, torrent_blocker_service: TorrentBlockerService | None = None):
         self.bot = bot
         self.settings = settings
         self.i18n = i18n
         self.async_session_factory = async_session_factory
         self.panel_service = panel_service
         self.notification_service = notification_service
+        self.torrent_blocker_service = torrent_blocker_service
 
     async def _send_message(
         self,
@@ -245,12 +249,27 @@ class PanelWebhookService:
         except Exception:
             return web.Response(status=400, text="bad_request")
 
+        if not isinstance(payload, dict):
+            return web.Response(status=400, text="bad_request")
+
         event_name = payload.get("name") or payload.get("event")
 
         if not event_name:
             return web.Response(status=200, text="ok_no_event")
 
-        if event_name in NODE_EVENTS:
+        if event_name == TORRENT_REPORT_EVENT:
+            if not self.settings.TORRENT_BLOCKER_NOTIFICATIONS_ENABLED:
+                return web.Response(status=200, text="ok_disabled")
+            if self.torrent_blocker_service is None:
+                return web.Response(status=503, text="torrent_service_unavailable")
+            try:
+                await self.torrent_blocker_service.handle_event(payload.get("data"))
+            except ValidationError:
+                return web.Response(status=400, text="invalid_torrent_report")
+            except Exception as exc:
+                logging.warning("Torrent report notification failed (%s)", type(exc).__name__)
+                return web.Response(status=503, text="torrent_notification_failed")
+        elif event_name in NODE_EVENTS:
             node_data = payload.get("payload") or payload.get("data") or {}
             if isinstance(node_data, dict) and "node" in node_data:
                 node_data = node_data["node"]
