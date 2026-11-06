@@ -98,7 +98,22 @@ individual GETs. Panel read/modify/write is not atomic; a simultaneous manual
 edit between the fresh GET and PATCH can still conflict. Interactive purchases
 and admin balance operations retain their existing fresh individual reads.
 
-Cycle completion is logged with user/change/pending-notice counts and duration.
+Every enabled cycle emits one INFO summary after all DB, panel and notification
+work, including empty, failed and cancelled cycles. Example:
+
+```text
+LTE checks: status=ok duration=12.34s users=10000 changed=400 synced=400 patch_attempts=300 access_read_attempts=2 deferred=0 missing=0 errors=0 pending_notices=1
+```
+
+`duration` is total elapsed time measured with a monotonic clock. `changed`
+counts users requiring synchronization; it is not the PATCH count. `synced`
+counts successfully committed user reconciliations. `patch_attempts` and
+`access_read_attempts` count update calls and extra reads before access changes,
+including failed attempts; bulk page reads are not included. `deferred` counts
+users postponed after a concurrent change or panel outage; `missing` counts
+panel references absent from the snapshot. `pending_notices` is the number of
+pending notification rows selected, not the number of delivered messages.
+Status is `ok`, `partial`, `empty`, `panel_error`, `failed`, or `cancelled`.
 The interval schedules a cycle; it is not a guarantee that a large cycle finishes
 within that time. Existing scheduler overlap/coalescing rules still apply.
 

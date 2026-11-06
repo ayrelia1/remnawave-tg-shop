@@ -4,6 +4,7 @@ The panel remains the only traffic collector. This service never resets its
 counters, changes node multipliers, or limits the whole panel account.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -49,6 +50,19 @@ class CheckSnapshot:
     account: LteAccount
     account_state: tuple
     subscriptions: tuple
+
+
+@dataclass
+class CheckStats:
+    users: int = 0
+    changed: int = 0
+    synced: int = 0
+    patch_attempts: int = 0
+    access_read_attempts: int = 0
+    deferred: int = 0
+    missing: int = 0
+    errors: int = 0
+    pending_notices: int = 0
 
 
 class LteService:
@@ -136,7 +150,8 @@ class LteService:
 
     async def reconcile(self, session: AsyncSession, user_id: int, *,
                         panel_user: dict | None = None,
-                        snapshot: CheckSnapshot | None = None) -> bool:
+                        snapshot: CheckSnapshot | None = None,
+                        stats: CheckStats | None = None) -> bool:
         if not self.enabled:
             return False
         account = await lte_dal.lock_account(session, user_id)
@@ -163,11 +178,15 @@ class LteService:
         if snapshot is not None and "activeInternalSquads" in payload:
             # Membership PATCH replaces the entire list. A bulk snapshot can
             # predate panel-admin edits, so refresh only actual access changes.
+            if stats is not None:
+                stats.access_read_attempts += 1
             panel_user = await self.panel.get_user_by_ref(user.panel_user_uuid)
             if not panel_user or panel_user.get("error"):
                 raise RuntimeError("Cannot refresh panel account for LTE access update")
             payload = self._project_check(account, user, panel_user)
         if payload:
+            if stats is not None:
+                stats.patch_attempts += 1
             updated = await self.panel.update_user_details_on_panel(
                 user.panel_user_uuid, payload)
             if not updated or updated.get("error"):
@@ -216,14 +235,38 @@ class LteService:
         if not self.enabled:
             return
         started = monotonic()
+        stats = CheckStats()
+        status = "failed"
+        try:
+            status = await self._run_checks(session_factory, stats)
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
+        except Exception:
+            stats.errors += 1
+            raise
+        finally:
+            # Include DB work, panel reads/writes, notification delivery and
+            # cleanup, even when a cycle exits early or is cancelled.
+            logging.info(
+                "LTE checks: status=%s duration=%.2fs users=%s changed=%s synced=%s "
+                "patch_attempts=%s access_read_attempts=%s deferred=%s missing=%s "
+                "errors=%s pending_notices=%s",
+                status, monotonic() - started, stats.users, stats.changed, stats.synced,
+                stats.patch_attempts, stats.access_read_attempts, stats.deferred,
+                stats.missing, stats.errors, stats.pending_notices)
+
+    async def _run_checks(self, session_factory: async_sessionmaker[AsyncSession],
+                          stats: CheckStats) -> str:
         # Read DB state BEFORE the panel snapshot. Only changed rows need a
         # transaction; a guarded reconciliation serializes them with purchases.
         async with session_factory() as session:
             rows = list(await session.execute(select(User, LteAccount).join(
                 LteAccount, LteAccount.user_id == User.user_id).where(
                     LteAccount.managed.is_(True), User.panel_user_uuid.is_not(None))))
+            stats.users = len(rows)
             if not rows:
-                return
+                return "empty"
             subscriptions: dict[int, list[tuple]] = {}
             for row in await session.execute(subscription_state_query().join(
                     LteAccount, LteAccount.user_id == Subscription.user_id).where(
@@ -238,8 +281,9 @@ class LteService:
                 raise RuntimeError("Incomplete panel snapshot")
             indexed = index_panel_users(users)
         except Exception:
+            stats.errors += 1
             logging.warning("LTE checks deferred: cannot read a complete panel snapshot")
-            return
+            return "panel_error"
 
         changed = []
         ready_to_notify: set[int] = set()
@@ -247,6 +291,7 @@ class LteService:
             panel_user = indexed.get(str(snapshot.user.panel_user_uuid))
             if panel_user is None:
                 # A deleted/unlinked panel user is not a zero traffic counter.
+                stats.missing += 1
                 continue
             try:
                 payload = self._project_check(snapshot.account, snapshot.user, panel_user)
@@ -255,30 +300,35 @@ class LteService:
                 else:
                     ready_to_notify.add(snapshot.user.user_id)
             except Exception:
+                stats.errors += 1
                 logging.warning("Invalid LTE snapshot for user %s; will retry", snapshot.user.user_id)
 
+        stats.changed = len(changed)
         unavailable = False
-        deferred = 0
 
         async def update(item):
-            nonlocal unavailable, deferred
+            nonlocal unavailable
             if unavailable:
+                stats.deferred += 1
                 return
             snapshot, panel_user = item
             user_id = snapshot.user.user_id
             try:
                 async with session_factory() as session:
                     reconciled = await self.reconcile(
-                        session, user_id, panel_user=panel_user, snapshot=snapshot)
+                        session, user_id, panel_user=panel_user, snapshot=snapshot, stats=stats)
                     if not reconciled:
-                        deferred += 1
+                        stats.deferred += 1
                         return
                     await session.commit()
+                stats.synced += 1
                 ready_to_notify.add(user_id)
             except PanelUnavailableError:
+                stats.errors += 1
                 unavailable = True
                 logging.warning("LTE updates deferred: panel unavailable; will retry next interval")
             except Exception:
+                stats.errors += 1
                 logging.warning("LTE synchronization failed for user %s; will retry", user_id, exc_info=True)
 
         await run_bounded(changed, update)
@@ -291,15 +341,16 @@ class LteService:
                     or_(LteAccount.notification_pending.is_(True),
                         LteAccount.low_notification_pending.is_(True)))
                 .order_by(LteAccount.user_id))).scalars())
+        stats.pending_notices = len(pending)
         for user_id in pending:
             if user_id not in ready_to_notify:
                 continue
             try:
                 await self._notify(session_factory, user_id)
             except Exception:
+                stats.errors += 1
                 logging.warning("LTE notification failed for user %s; will retry", user_id, exc_info=True)
-        logging.info("LTE checks: users=%s, changed=%s, deferred=%s, pending_notices=%s, duration=%.2fs",
-                     len(snapshots), len(changed), deferred, len(pending), monotonic() - started)
+        return "partial" if stats.errors or stats.deferred or stats.missing else "ok"
 
     async def _notify(self, session_factory, user_id):
         if self.bot is None or self.i18n is None:
