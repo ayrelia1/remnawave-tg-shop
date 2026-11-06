@@ -42,7 +42,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
     user_id_str = metadata.get("user_id")
     subscription_months_str = metadata.get("subscription_months")
     traffic_gb_str = metadata.get("traffic_gb")
-    sale_mode = metadata.get("sale_mode") or ("traffic" if settings.traffic_sale_mode else "subscription")
+    sale_mode = metadata.get("sale_mode") or "subscription"
     promo_code_id_str = metadata.get("promo_code_id")
     payment_db_id_str = metadata.get("payment_db_id")
     device_limit_str = metadata.get("device_limit")
@@ -73,7 +73,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
             )
             return False
         payment_db_id = int(payment_db_id_str)
-        is_auto_renew = bool(auto_renew_subscription_id_str and sale_mode != "traffic")
+        is_auto_renew = bool(auto_renew_subscription_id_str and sale_mode != "lte_topup")
         promo_code_id = int(
             promo_code_id_str
         ) if promo_code_id_str and promo_code_id_str.isdigit() else None
@@ -96,6 +96,14 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 payment_record.user_id,
             )
             return False
+
+        sale_mode = getattr(payment_record, "product_type", "subscription")
+        if sale_mode == "lte_topup":
+            traffic_amount_gb = payment_record.lte_traffic_bytes / 2**30
+        else:
+            subscription_months = payment_record.subscription_duration_months or subscription_months
+            device_limit_str = str(payment_record.hwid_device_limit) if payment_record.hwid_device_limit else None
+        is_auto_renew = bool(auto_renew_subscription_id_str and sale_mode != "lte_topup")
 
         # Provider-backed verification (defense-in-depth): verify actual YooKassa payment state
         if yk_payment_id_from_hook and yookassa_service and yookassa_service.configured:
@@ -318,9 +326,9 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
         except Exception:
             logging.exception("Failed to persist YooKassa payment method from webhook")
 
-        months_for_activation = int(subscription_months) if sale_mode != "traffic" else 0
+        months_for_activation = int(subscription_months) if sale_mode != "lte_topup" else 0
         device_limit_for_activation = None
-        if sale_mode != "traffic" and device_limit_str:
+        if sale_mode != "lte_topup" and device_limit_str:
             try:
                 device_limit_for_activation = int(float(device_limit_str))
             except (TypeError, ValueError):
@@ -335,11 +343,12 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 promo_code_id_from_payment=promo_code_id,
                 provider="yookassa",
                 sale_mode=sale_mode,
-                traffic_gb=traffic_amount_gb if sale_mode == "traffic" else None,
+                traffic_gb=traffic_amount_gb if sale_mode == "lte_topup" else None,
                 device_limit=device_limit_for_activation,
             )
         except Exception:
             previous_status = payment_before_update.status if payment_before_update else "pending_yookassa"
+            await session.rollback()
             await payment_dal.rollback_provider_payment_processing(
                 session,
                 payment_db_id,
@@ -357,6 +366,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 f"Failed to activate subscription for user {user_id} after payment {yk_payment_id_from_hook}"
             )
             previous_status = payment_before_update.status if payment_before_update else "pending_yookassa"
+            await session.rollback()
             await payment_dal.rollback_provider_payment_processing(
                 session,
                 payment_db_id,
@@ -383,7 +393,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
             "applied_promo_bonus_days", 0)
 
         referral_bonus_info = None
-        if sale_mode != "traffic":
+        if sale_mode != "lte_topup":
             referral_bonus_info = await referral_service.apply_referral_bonuses_for_payment(
                 session,
                 user_id,
@@ -414,7 +424,7 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
         if should_send_lknpd_receipt:
             receipt_item_name = payment_info_from_webhook.get("description")
             if not receipt_item_name:
-                if sale_mode == "traffic":
+                if sale_mode == "lte_topup":
                     receipt_item_name = settings.LKNPD_RECEIPT_NAME_TRAFFIC.format(gb=traffic_label)
                 else:
                     receipt_item_name = settings.LKNPD_RECEIPT_NAME_SUBSCRIPTION.format(months=int(subscription_months))
@@ -435,14 +445,14 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
         )
         config_link_text = config_link_display or _("config_link_not_available")
         # For auto-renew charges, avoid re-sending config link; send concise message
-        if sale_mode != "traffic" and is_auto_renew and final_end_date_for_user:
+        if sale_mode != "lte_topup" and is_auto_renew and final_end_date_for_user:
             details_message = _(
                 "yookassa_auto_renewal",
                 months=int(subscription_months),
                 end_date=final_end_date_for_user.strftime('%d.%m.%Y'),
             )
             details_markup = None
-        elif sale_mode == "traffic":
+        elif sale_mode == "lte_topup":
             details_message = _(
                 "payment_successful_traffic_full",
                 traffic_gb=traffic_label,
@@ -532,11 +542,11 @@ async def process_successful_payment(session: AsyncSession, bot: Bot,
                 user_id=user_id,
                 amount=payment_value,
                 currency="RUB",
-                months=int(subscription_months) if sale_mode != "traffic" else 0,
+                months=int(subscription_months) if sale_mode != "lte_topup" else 0,
                 payment_provider="yookassa",  # This is specifically for YooKassa webhook
                 username=user.username if user else None,
-                traffic_gb=traffic_amount_gb if sale_mode == "traffic" else None,
-                device_limit=device_limit_for_activation if sale_mode != "traffic" else None,
+                traffic_gb=traffic_amount_gb if sale_mode == "lte_topup" else None,
+                device_limit=device_limit_for_activation if sale_mode != "lte_topup" else None,
             )
         except Exception as e:
             logging.error(f"Failed to send payment notification: {e}")

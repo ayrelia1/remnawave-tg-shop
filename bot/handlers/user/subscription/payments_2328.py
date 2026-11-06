@@ -115,7 +115,7 @@ async def pay_2328_callback_handler(
     human_value = str(int(months)) if float(months).is_integer() else f"{months:g}"
     payment_description = (
         get_text("payment_description_traffic", traffic_gb=human_value)
-        if sale_mode == "traffic"
+        if sale_mode == "lte_topup"
         else get_text("payment_description_subscription", months=int(months))
     )
     currency_code = "RUB"
@@ -131,20 +131,25 @@ async def pay_2328_callback_handler(
         "status": "pending_2328",
         "description": payment_description,
         "subscription_duration_months": int(months),
+        "product_type": sale_mode,
+        "purchase_value": months,
         "provider": "2328",
         "promo_code_id": None,
-        "hwid_device_limit": devices if sale_mode != "traffic" else None,
+        "hwid_device_limit": devices if sale_mode != "lte_topup" else None,
     }
 
     try:
         payment_record = await payment_dal.get_unconfirmed_provider_payment(
             session, user_id=user_id, provider="2328", amount=price_rub,
             currency=currency_code, months=int(months),
-            device_limit=payment_record_payload["hwid_device_limit"],
+            device_limit=(0 if sale_mode == "subscription" and devices is None
+                          else payment_record_payload["hwid_device_limit"]),
+            product_type=sale_mode,
+            lte_traffic_bytes=(int(months * 2**30) if sale_mode == "lte_topup" else None),
         )
         is_retry = payment_record is not None
         if not payment_record:
-            payment_record = await payment_dal.create_payment_record(session, payment_record_payload)
+            payment_record = await payment_dal.create_payment_record(session, payment_record_payload, settings=settings)
         await session.commit()
     except Exception as e_db_create:
         await session.rollback()
@@ -200,7 +205,7 @@ async def pay_2328_callback_handler(
                 )
 
             message_text = get_text(
-                key="payment_link_message_traffic" if sale_mode == "traffic" else "payment_link_message",
+                key="payment_link_message_traffic" if sale_mode == "lte_topup" else "payment_link_message",
                 months=int(months),
                 traffic_gb=human_value,
             )
@@ -212,7 +217,7 @@ async def pay_2328_callback_handler(
                         payment_url,
                         current_lang,
                         i18n,
-                        back_callback=offer_back_callback(devices, months),
+                        back_callback=offer_back_callback(devices, months, sale_mode),
                         back_text_key="back_to_payment_methods_button",
                     ),
                     disable_web_page_preview=False,
@@ -226,7 +231,7 @@ async def pay_2328_callback_handler(
                             payment_url,
                             current_lang,
                             i18n,
-                            back_callback=offer_back_callback(devices, months),
+                            back_callback=offer_back_callback(devices, months, sale_mode),
                             back_text_key="back_to_payment_methods_button",
                         ),
                         disable_web_page_preview=False,

@@ -261,33 +261,28 @@ def get_trial_confirmation_keyboard(lang: str,
     return builder.as_markup()
 
 
-def get_subscription_options_keyboard(subscription_options: Dict[
+def get_lte_packages_keyboard(packages: Dict[
     float, Optional[float]], currency_symbol_val: str, lang: str,
-                                      i18n_instance, traffic_mode: bool = False) -> InlineKeyboardMarkup:
+                             i18n_instance,
+                             currencies: Optional[Dict[float, str]] = None) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
     def _format_gb(val: float) -> str:
         return str(int(val)) if float(val).is_integer() else f"{val:g}"
-    if subscription_options:
-        for months, price in subscription_options.items():
+    if packages:
+        for gb in sorted(packages):
+            price = packages[gb]
+            currency = (currencies or {}).get(gb, currency_symbol_val)
             if price is not None:
-                if traffic_mode:
-                    button_text = _(
-                        "buy_traffic_package_button",
-                        traffic_gb=_format_gb(months),
-                        price=price,
-                        currency_symbol=currency_symbol_val,
-                    )
-                    callback_data = f"subscribe_period:{_format_gb(months)}"
-                else:
-                    button_text = _("subscribe_for_months_button",
-                                    months=months,
-                                    price=price,
-                                    currency_symbol=currency_symbol_val)
-                    callback_data = f"subscribe_period:{months}"
+                button_text = _(
+                    "buy_traffic_package_button",
+                    traffic_gb=_format_gb(gb),
+                    price=_fmt_price(price),
+                    currency_symbol=currency,
+                )
                 builder.button(
                     text=button_text,
-                    callback_data=callback_data,
+                    callback_data=f"lte_package:{_format_gb(gb)}",
                     icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
                 )
         builder.adjust(1)
@@ -307,7 +302,7 @@ def _fmt_price(val: float) -> str:
 
 def get_device_tier_keyboard(tier_min_prices: Dict[int, float],
                              currency_symbol_val: str, lang: str,
-                             i18n_instance) -> InlineKeyboardMarkup:
+                             i18n_instance, currencies: Optional[Dict[int, str]] = None) -> InlineKeyboardMarkup:
     """First step of the device-plan flow: choose number of devices.
 
     tier_min_prices maps device count -> its lowest (shortest period) price.
@@ -316,10 +311,10 @@ def get_device_tier_keyboard(tier_min_prices: Dict[int, float],
     builder = InlineKeyboardBuilder()
     for devices in sorted(tier_min_prices.keys()):
         builder.button(
-            text=_("subscribe_device_tier_button",
+            text=_("subscribe_device_tier_button" if devices else "subscribe_device_tier_unlimited_button",
                    devices=devices,
                    price=_fmt_price(tier_min_prices[devices]),
-                   currency_symbol=currency_symbol_val),
+                   currency_symbol=(currencies or {}).get(devices, currency_symbol_val)),
             callback_data=f"subscribe_tier:{devices}",
             icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
         )
@@ -336,7 +331,7 @@ def get_device_tier_keyboard(tier_min_prices: Dict[int, float],
 
 def get_subscription_period_keyboard(devices: int, tier_options: Dict[int, float],
                                      currency_symbol_val: str, lang: str,
-                                     i18n_instance) -> InlineKeyboardMarkup:
+                                     i18n_instance, currencies: Optional[Dict[int, str]] = None) -> InlineKeyboardMarkup:
     """Second step of the device-plan flow: choose duration for a chosen tier."""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
@@ -348,7 +343,7 @@ def get_subscription_period_keyboard(devices: int, tier_options: Dict[int, float
             text=_("subscribe_for_months_button",
                    months=months,
                    price=_fmt_price(price),
-                   currency_symbol=currency_symbol_val),
+                   currency_symbol=(currencies or {}).get(months, currency_symbol_val)),
             callback_data=f"subscribe_period:{int(devices)}:{months}",
             icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
         )
@@ -382,7 +377,7 @@ def get_tariff_switch_confirm_keyboard(devices: int, months: int, lang: str,
     return builder.as_markup()
 
 
-def get_payment_method_keyboard(months: int, price: float,
+def get_payment_method_keyboard(months: int, price: Optional[float],
                                 stars_price: Optional[int],
                                 currency_symbol_val: str, lang: str,
                                 i18n_instance, settings: Settings, sale_mode: str = "subscription",
@@ -393,10 +388,12 @@ def get_payment_method_keyboard(months: int, price: float,
         return str(int(val)) if float(val).is_integer() else f"{val:g}"
     months_str = _format_value(months)
     # Device-tier offers prepend the device count, yielding a 4-part payload
-    # (devices:months:price:mode); legacy/traffic keep the 3-part form.
+    # (devices:months:price:mode); LTE top-ups use the 3-part form.
     value_str = f"{int(devices)}:{months_str}" if devices is not None else months_str
     mode_suffix = f":{sale_mode}"
     for method in settings.payment_methods_order:
+        if price is None and method != "stars":
+            continue
         if method == "severpay" and getattr(settings, "SEVERPAY_ENABLED", False):
             builder.button(
                 text=_("pay_with_severpay_button"),
@@ -451,7 +448,7 @@ def get_payment_method_keyboard(months: int, price: float,
             )
     builder.button(
         text=_(key="cancel_button"),
-        callback_data="main_action:subscribe",
+        callback_data="lte:packages" if sale_mode == "lte_topup" else "main_action:subscribe",
         icon_custom_emoji_id=PREMIUM_EMOJI_CANCEL,
     )
     builder.adjust(1)
@@ -523,7 +520,7 @@ def get_yk_autopay_choice_keyboard(
     builder.row(
         InlineKeyboardButton(
             text=_(key="back_to_payment_methods_button"),
-            callback_data=f"subscribe_period:{value_str}",
+            callback_data=f"lte_package:{months_str}" if sale_mode == "lte_topup" else f"subscribe_period:{value_str}",
             icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
         )
     )

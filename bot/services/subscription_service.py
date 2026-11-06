@@ -5,8 +5,8 @@ from typing import Optional, Dict, Any, List, Tuple
 from aiogram import Bot
 from bot.middlewares.i18n import JsonI18n
 
-from db.dal import user_dal, subscription_dal, promo_code_dal, user_billing_dal, payment_dal
-from bot.utils.date_utils import add_months
+from db.dal import user_dal, subscription_dal, promo_code_dal, user_billing_dal, payment_dal, lte_dal
+from bot.utils.date_utils import add_months, as_utc
 from bot.utils.config_link import prepare_config_links
 from db.models import User, Subscription
 
@@ -85,6 +85,14 @@ class SubscriptionService:
             )
             return None, None, None, False
 
+        default_squads = self.settings.parsed_user_squad_uuids
+        if getattr(self.settings, "LTE_ENFORCEMENT_ENABLED", False):
+            from db.models import LteAccount
+            account = await session.get(LteAccount, user_id)
+            if account is None or account.managed:
+                lte_squads = self.settings.parsed_lte_squad_uuids
+                default_squads = [s for s in (default_squads or []) if s not in lte_squads]
+
         current_local_panel_uuid = db_user.panel_user_uuid
         panel_username_on_panel_standard = panel_username_for_telegram_id(user_id)
 
@@ -140,15 +148,10 @@ class SubscriptionService:
                     creation_response = await self.panel_service.create_panel_user(
                         username_on_panel=panel_username_on_panel_standard,
                         telegram_id=user_id,
-                        description="\n".join([
-                            (db_user.username or "") if db_user else "",
-                            (db_user.first_name or "") if db_user else "",
-                            (db_user.last_name or "") if db_user else "",
-                        ]),
-                        specific_squad_uuids=self.settings.parsed_user_squad_uuids,
+                        specific_squad_uuids=default_squads,
                         external_squad_uuid=self.settings.parsed_user_external_squad_uuid,
                         default_traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
-                        default_traffic_limit_strategy=self.settings.USER_TRAFFIC_STRATEGY,
+                        default_traffic_limit_strategy="NO_RESET",
                     )
                     if (
                         creation_response
@@ -169,15 +172,10 @@ class SubscriptionService:
                 creation_response = await self.panel_service.create_panel_user(
                     username_on_panel=panel_username_on_panel_standard,
                     telegram_id=user_id,
-                    description="\n".join([
-                        (db_user.username or "") if db_user else "",
-                        (db_user.first_name or "") if db_user else "",
-                        (db_user.last_name or "") if db_user else "",
-                    ]),
-                    specific_squad_uuids=self.settings.parsed_user_squad_uuids,
+                    specific_squad_uuids=default_squads,
                     external_squad_uuid=self.settings.parsed_user_external_squad_uuid,
                     default_traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
-                    default_traffic_limit_strategy=self.settings.USER_TRAFFIC_STRATEGY,
+                    default_traffic_limit_strategy="NO_RESET",
                 )
                 if (
                     creation_response
@@ -301,19 +299,9 @@ class SubscriptionService:
             logging.info(
                 f"Panel user {current_local_panel_uuid} has telegramId '{panel_telegram_id_from_api}'. Updating on panel to '{user_id}'."
             )
-            # Also set readable description with Telegram fields
             await self.panel_service.update_user_details_on_panel(
                 current_local_panel_uuid,
-                {
-                    "telegramId": user_id,
-                    "description": "\n".join(
-                        [
-                            (db_user.username or "") if db_user else "",
-                            (db_user.first_name or "") if db_user else "",
-                            (db_user.last_name or "") if db_user else "",
-                        ]
-                    ),
-                },
+                {"telegramId": user_id},
             )
 
         panel_sub_link_id = panel_user_obj_from_api.get(
@@ -336,7 +324,8 @@ class SubscriptionService:
     async def activate_trial_subscription(
         self, session: AsyncSession, user_id: int
     ) -> Optional[Dict[str, Any]]:
-        if not self.settings.TRIAL_ENABLED or self.settings.TRIAL_DURATION_DAYS <= 0:
+        settings = self.settings
+        if not settings.TRIAL_ENABLED or settings.TRIAL_DURATION_DAYS <= 0:
             return {
                 "eligible": False,
                 "activated": False,
@@ -352,6 +341,7 @@ class SubscriptionService:
                 "message_key": "user_not_found_for_trial",
             }
 
+        await lte_dal.lock_account(session, user_id)
         if await self.has_had_any_subscription(session, user_id):
             return {
                 "eligible": False,
@@ -372,15 +362,15 @@ class SubscriptionService:
             }
 
         start_date = datetime.now(timezone.utc)
-        end_date = start_date + timedelta(days=self.settings.TRIAL_DURATION_DAYS)
+        end_date = start_date + timedelta(days=settings.TRIAL_DURATION_DAYS)
 
         await subscription_dal.deactivate_other_active_subscriptions(
             session, panel_user_uuid, panel_sub_link_id
         )
 
-        trial_device_limit = self.settings.USER_HWID_DEVICE_LIMIT
-        if self.settings.device_plans_active and self.settings.base_device_limit:
-            trial_device_limit = self.settings.base_device_limit
+        trial_device_limit = settings.USER_HWID_DEVICE_LIMIT
+        if settings.device_plans_active and settings.base_device_limit:
+            trial_device_limit = settings.base_device_limit
 
         trial_sub_data = {
             "user_id": user_id,
@@ -391,12 +381,12 @@ class SubscriptionService:
             "duration_months": 0,
             "is_active": True,
             "status_from_panel": "TRIAL",
-            "traffic_limit_bytes": self.settings.trial_traffic_limit_bytes,
+            "traffic_limit_bytes": 0,
             "auto_renew_enabled": False,
             "hwid_device_limit": trial_device_limit,
         }
         try:
-            await subscription_dal.upsert_subscription(session, trial_sub_data)
+            trial_sub = await subscription_dal.upsert_subscription(session, trial_sub_data)
         except Exception as e_upsert:
             logging.error(
                 f"Failed to upsert trial subscription for user {user_id}: {e_upsert}",
@@ -413,18 +403,15 @@ class SubscriptionService:
             panel_user_uuid=panel_user_uuid,
             expire_at=end_date,
             status="ACTIVE",
-            traffic_limit_bytes=self.settings.trial_traffic_limit_bytes,
+            traffic_limit_bytes=0,
             hwid_device_limit=trial_device_limit,
         )
 
-        # Add user description based on Telegram profile
-        panel_update_payload["description"] = "\n".join(
-            [
-                (db_user.username or "") if db_user else "",
-                (db_user.first_name or "") if db_user else "",
-                (db_user.last_name or "") if db_user else "",
-            ]
-        )
+        await lte_dal.credit(session, user_id, settings.trial_traffic_limit_bytes,
+                             f"trial:{trial_sub.subscription_id}:{start_date.isoformat()}")
+        from .lte_service import LteService
+        panel_update_payload = await LteService(settings, self.panel_service).project_payload(
+            session, user_id, panel_user_uuid, panel_update_payload)
 
         updated_panel_user = await self.panel_service.update_user_details_on_panel(
             panel_user_uuid, panel_update_payload
@@ -449,124 +436,38 @@ class SubscriptionService:
             "eligible": True,
             "activated": True,
             "end_date": end_date,
-            "days": self.settings.TRIAL_DURATION_DAYS,
-            "traffic_gb": self.settings.TRIAL_TRAFFIC_LIMIT_GB,
+            "days": settings.TRIAL_DURATION_DAYS,
+            "traffic_gb": settings.TRIAL_TRAFFIC_LIMIT_GB,
             "panel_user_uuid": panel_user_uuid,
             "panel_short_uuid": final_panel_short_uuid,
             "subscription_url": final_subscription_url,
         }
 
-    async def _activate_traffic_package(
-        self,
-        session: AsyncSession,
-        user_id: int,
-        traffic_gb: float,
-        payment_amount: float,
-        payment_db_id: int,
-        provider: str = "yookassa",
-    ) -> Optional[Dict[str, Any]]:
-        """Activate or extend a traffic-based package instead of a time-based subscription."""
-        db_user = await user_dal.get_user_by_id(session, user_id)
-        if not db_user:
-            logging.error("User %s not found for traffic package activation", user_id)
+    async def _activate_lte_topup(self, session, user_id, payment):
+        user = await user_dal.get_user_by_id(session, user_id)
+        if not user or not user.panel_user_uuid or payment.lte_traffic_bytes is None:
             return None
-
-        panel_user_uuid, panel_sub_link_id, panel_short_uuid, _ = (
-            await self._get_or_create_panel_user_link_details(session, user_id, db_user)
-        )
-
-        if not panel_user_uuid or not panel_sub_link_id:
-            logging.error("Failed to ensure panel linkage for user %s during traffic activation", user_id)
-            return None
-
-        panel_user_data = await self.panel_service.get_user_by_ref(panel_user_uuid) or {}
-        traffic_info = panel_user_data.get("userTraffic") or {}
-        current_limit = panel_user_data.get("trafficLimitBytes")
-        current_used = traffic_info.get("usedTrafficBytes")
-
-        active_sub = await subscription_dal.get_active_subscription_by_user_id(
-            session, user_id, panel_user_uuid
-        )
-        if current_limit is None and active_sub:
-            current_limit = active_sub.traffic_limit_bytes
-        if current_used is None and active_sub:
-            current_used = active_sub.traffic_used_bytes
-
-        purchase_bytes = int(float(traffic_gb) * (1024**3))
-        new_limit = (current_limit or 0) + purchase_bytes
-
-        start_date = datetime.now(timezone.utc)
-        # Set a far-future expiry to satisfy panel requirements; keep the latest known expiry if it's further.
-        far_future = datetime(2099, 1, 1, tzinfo=timezone.utc)
-        final_end_date = far_future
-        if active_sub and active_sub.end_date and active_sub.end_date > final_end_date:
-            final_end_date = active_sub.end_date
-
-        await subscription_dal.deactivate_other_active_subscriptions(
-            session, panel_user_uuid, panel_sub_link_id
-        )
-
-        sub_payload = {
-            "user_id": user_id,
-            "panel_user_uuid": panel_user_uuid,
-            "panel_subscription_uuid": panel_sub_link_id,
-            "start_date": start_date,
-            "end_date": final_end_date,
-            "duration_months": 0,
-            "is_active": True,
-            "status_from_panel": "ACTIVE",
-            "traffic_limit_bytes": new_limit,
-            "traffic_used_bytes": current_used,
-            "provider": provider,
-            "skip_notifications": True,
-            "auto_renew_enabled": False,
-        }
-
-        try:
-            new_or_updated_sub = await subscription_dal.upsert_subscription(session, sub_payload)
-        except Exception as exc:
-            logging.error("Failed to upsert traffic subscription for user %s: %s", user_id, exc, exc_info=True)
-            return None
-
-        panel_update_payload = self._build_panel_update_payload(
-            panel_user_uuid=panel_user_uuid,
-            expire_at=final_end_date,
-            status="ACTIVE",
-            traffic_limit_bytes=new_limit,
-            traffic_limit_strategy="NO_RESET",
-        )
-
-        panel_update_payload["description"] = "\n".join(
-            [
-                (db_user.username or "") if db_user else "",
-                (db_user.first_name or "") if db_user else "",
-                (db_user.last_name or "") if db_user else "",
-            ]
-        )
-
-        updated_panel_user = await self.panel_service.update_user_details_on_panel(
-            panel_user_uuid, panel_update_payload
-        )
-        if not updated_panel_user or updated_panel_user.get("error"):
-            logging.warning(
-                "Panel user details update FAILED for traffic package user %s. Response: %s",
-                panel_user_uuid,
-                updated_panel_user,
-            )
-            return None
-
-        final_subscription_url = updated_panel_user.get("subscriptionUrl")
-        final_panel_short_uuid = updated_panel_user.get("shortUuid", panel_short_uuid)
-
+        account = await lte_dal.credit(session, user_id, payment.lte_traffic_bytes,
+                                       f"payment:{payment.payment_id}", payment.payment_id)
+        panel_user = await self.panel_service.get_user_by_ref(user.panel_user_uuid)
+        if not panel_user or panel_user.get("error"):
+            raise RuntimeError("Cannot synchronize LTE purchase with panel")
+        from .lte_service import LteService
+        lte = LteService(self.settings, self.panel_service, self.bot, self.i18n)
+        if lte.enabled and account.managed:
+            await lte.reconcile(session, user_id)
+        from .promo_code_service import PromoCodeService
+        promo = getattr(self, "promo_code_service", None) or PromoCodeService(
+            self.settings, self, self.bot, self.i18n)
+        await promo.consume_discount(session, user_id, payment.payment_id)
         return {
-            "subscription_id": new_or_updated_sub.subscription_id,
-            "end_date": final_end_date,
-            "is_active": True,
-            "panel_user_uuid": panel_user_uuid,
-            "panel_short_uuid": final_panel_short_uuid,
-            "subscription_url": final_subscription_url,
+            "end_date": datetime.fromisoformat(panel_user["expireAt"].replace("Z", "+00:00")),
+            "is_active": panel_user.get("status") == "ACTIVE",
+            "panel_user_uuid": user.panel_user_uuid,
+            "panel_short_uuid": panel_user.get("shortUuid"),
+            "subscription_url": panel_user.get("subscriptionUrl"),
             "applied_promo_bonus_days": 0,
-            "traffic_limit_bytes": new_limit,
+            "lte_remaining_bytes": account.remaining_bytes,
         }
 
     async def activate_subscription(
@@ -582,17 +483,19 @@ class SubscriptionService:
         traffic_gb: Optional[float] = None,
         device_limit: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-
-        if sale_mode == "traffic" or getattr(self.settings, "traffic_sale_mode", False):
-            target_gb = traffic_gb if traffic_gb is not None else float(months)
-            return await self._activate_traffic_package(
-                session=session,
-                user_id=user_id,
-                traffic_gb=target_gb,
-                payment_amount=payment_amount,
-                payment_db_id=payment_db_id,
-                provider=provider,
-            )
+        """Fulfill recorded invoice terms; offer arguments remain for call compatibility."""
+        settings = self.settings
+        payment = await payment_dal.get_payment_by_db_id(session, payment_db_id)
+        if payment is None or payment.user_id != user_id:
+            raise ValueError("Payment does not belong to the user")
+        sale_mode = payment.product_type
+        if sale_mode == "lte_topup":
+            return await self._activate_lte_topup(session, user_id, payment)
+        if sale_mode != "subscription":
+            raise ValueError("Unknown payment product")
+        months = payment.subscription_duration_months
+        device_limit = payment.hwid_device_limit
+        await lte_dal.lock_account(session, user_id)
 
         db_user = await user_dal.get_user_by_id(session, user_id)
         if not db_user:
@@ -619,13 +522,15 @@ class SubscriptionService:
         current_active_sub = await subscription_dal.get_active_subscription_by_user_id(
             session, user_id, panel_user_uuid
         )
+        if current_active_sub and current_active_sub.end_date:
+            current_active_sub.end_date = as_utc(current_active_sub.end_date)
         now_utc = datetime.now(timezone.utc)
 
-        # Resolve the device tier for this purchase. In legacy single-tier mode
-        # device_limit stays None and the panel keeps its global hwidDeviceLimit.
+        # Historical invoices may have no recorded tier. New invoices always
+        # include it; old invoices retain their existing activation behavior.
         effective_device_limit = device_limit
-        if effective_device_limit is None and self.settings.device_plans_active:
-            effective_device_limit = self.settings.base_device_limit
+        if effective_device_limit is None and settings.device_plans_active:
+            effective_device_limit = settings.base_device_limit
 
         has_remaining = bool(
             current_active_sub
@@ -639,9 +544,9 @@ class SubscriptionService:
             # legacy subscriptions have no tariff (NULL) -> not a switch, just stack.
             old_tier = current_active_sub.hwid_device_limit
             is_tier_switch = bool(
-                self.settings.device_plans_active
-                and effective_device_limit
-                and old_tier
+                settings.device_plans_active
+                and effective_device_limit is not None
+                and old_tier is not None
                 and int(old_tier) != int(effective_device_limit)
             )
             if is_tier_switch:
@@ -649,8 +554,8 @@ class SubscriptionService:
                 # are converted by cost into the new tier, then the purchased
                 # period is added on top. No surcharge/refund (no balance).
                 remaining_days = max(0, (current_active_sub.end_date - now_utc).days)
-                rate_old = self.settings.tier_monthly_rate(int(old_tier))
-                rate_new = self.settings.tier_monthly_rate(int(effective_device_limit))
+                rate_old = settings.tier_monthly_rate(int(old_tier))
+                rate_new = settings.tier_monthly_rate(int(effective_device_limit))
                 if rate_old and rate_new:
                     converted_days = int(round(remaining_days * rate_old / rate_new))
                 else:
@@ -710,7 +615,7 @@ class SubscriptionService:
         )
 
         auto_renew_should_enable = False
-        if provider == "yookassa" and self.settings.yookassa_autopayments_active:
+        if provider == "yookassa" and settings.yookassa_autopayments_active:
             auto_renew_should_enable = await user_billing_dal.user_has_saved_payment_method(
                 session, user_id
             )
@@ -724,7 +629,7 @@ class SubscriptionService:
             "duration_months": months_int,
             "is_active": True,
             "status_from_panel": "ACTIVE",
-            "traffic_limit_bytes": self.settings.user_traffic_limit_bytes,
+            "traffic_limit_bytes": settings.user_traffic_limit_bytes,
             "provider": provider,
             "skip_notifications": False,
             "auto_renew_enabled": auto_renew_should_enable,
@@ -745,18 +650,16 @@ class SubscriptionService:
             panel_user_uuid=panel_user_uuid,
             expire_at=final_end_date,
             status="ACTIVE",
-            traffic_limit_bytes=self.settings.user_traffic_limit_bytes,
+            traffic_limit_bytes=settings.user_traffic_limit_bytes,
             hwid_device_limit=effective_device_limit,
         )
 
-        # Add user description based on Telegram profile
-        panel_update_payload["description"] = "\n".join(
-            [
-                (db_user.username or "") if db_user else "",
-                (db_user.first_name or "") if db_user else "",
-                (db_user.last_name or "") if db_user else "",
-            ]
-        )
+        if payment.lte_traffic_bytes is not None:
+            await lte_dal.credit(session, user_id, payment.lte_traffic_bytes,
+                                 f"payment:{payment_db_id}", payment_db_id)
+        from .lte_service import LteService
+        panel_update_payload = await LteService(settings, self.panel_service).project_payload(
+            session, user_id, panel_user_uuid, panel_update_payload)
 
         updated_panel_user = await self.panel_service.update_user_details_on_panel(
             panel_user_uuid, panel_update_payload
@@ -777,7 +680,7 @@ class SubscriptionService:
                 from .promo_code_service import PromoCodeService
 
                 promo_code_service = PromoCodeService(
-                    self.settings, self, self.bot, self.i18n
+                    settings, self, self.bot, self.i18n
                 )
             await promo_code_service.consume_discount(session, user_id, payment_db_id)
         except Exception as e:
@@ -816,6 +719,9 @@ class SubscriptionService:
             )
             return None
 
+        settings = self.settings
+        await lte_dal.lock_account(session, user_id, create=True)
+
         panel_uuid, panel_sub_uuid, _, _ = await self._get_or_create_panel_user_link_details(
             session, user_id, user
         )
@@ -837,9 +743,9 @@ class SubscriptionService:
 
             # Apply main traffic limit for admin/referral/promo bonuses, fallback to trial limit otherwise
             traffic_limit = (
-                self.settings.user_traffic_limit_bytes
+                settings.user_traffic_limit_bytes
                 if apply_main_traffic_limit
-                else self.settings.trial_traffic_limit_bytes
+                else 0
             )
 
             bonus_sub_payload = {
@@ -853,7 +759,7 @@ class SubscriptionService:
                 "status_from_panel": "ACTIVE_BONUS",
                 "traffic_limit_bytes": traffic_limit,
                 "auto_renew_enabled": False,
-                "hwid_device_limit": self.settings.base_device_limit,
+                "hwid_device_limit": settings.base_device_limit,
             }
             await subscription_dal.deactivate_other_active_subscriptions(
                 session, panel_uuid, panel_sub_uuid
@@ -862,7 +768,7 @@ class SubscriptionService:
                 session, bonus_sub_payload
             )
         else:
-            current_end_date = active_sub.end_date
+            current_end_date = as_utc(active_sub.end_date)
             now_utc = datetime.now(timezone.utc)
             start_point_for_bonus = (
                 current_end_date if current_end_date > now_utc else now_utc
@@ -876,23 +782,28 @@ class SubscriptionService:
             if (
                 apply_main_traffic_limit
                 and updated_sub_model
-                and updated_sub_model.traffic_limit_bytes != self.settings.user_traffic_limit_bytes
+                and updated_sub_model.traffic_limit_bytes != settings.user_traffic_limit_bytes
             ):
                 updated_sub_model = await subscription_dal.update_subscription(
                     session,
                     updated_sub_model.subscription_id,
-                    {"traffic_limit_bytes": self.settings.user_traffic_limit_bytes},
+                    {"traffic_limit_bytes": settings.user_traffic_limit_bytes},
                 )
 
         if updated_sub_model:
             # Prepare panel update payload
             panel_update_payload = self._build_panel_update_payload(
                 expire_at=new_end_date_obj,
+                status="DISABLED" if user.is_banned else "ACTIVE",
                 traffic_limit_bytes=(
-                    self.settings.user_traffic_limit_bytes if apply_main_traffic_limit else None
+                    settings.user_traffic_limit_bytes if apply_main_traffic_limit else None
                 ),
                 include_uuid=False,
             )
+
+            from .lte_service import LteService
+            panel_update_payload = await LteService(settings, self.panel_service).project_payload(
+                session, user_id, panel_uuid, panel_update_payload)
 
             panel_update_success = (
                 await self.panel_service.update_user_details_on_panel(
@@ -1055,13 +966,11 @@ class SubscriptionService:
         sub: Subscription,
     ) -> bool:
         """Attempt to charge user using saved payment method. Return True on initiated/handled, False on failure."""
-        if getattr(self.settings, "traffic_sale_mode", False):
-            logging.info("Auto-renew skipped: traffic sale mode enabled")
-            return True
+        settings = self.settings
         if not sub.auto_renew_enabled:
             return True
         # If autopayments are disabled globally, skip charging attempts
-        if not self.settings.yookassa_autopayments_active:
+        if not settings.yookassa_autopayments_active:
             return True
         if sub.provider != "yookassa":
             logging.info("Auto-renew skipped: provider %s does not support auto-renew", sub.provider)
@@ -1083,15 +992,9 @@ class SubscriptionService:
             return False
 
         months = sub.duration_months or 1
-        renew_device_limit: Optional[int] = None
-        if self.settings.device_plans_active:
-            renew_device_limit = sub.hwid_device_limit or self.settings.base_device_limit
-            amount = (
-                self.settings.get_plan_price(int(renew_device_limit), int(months))
-                if renew_device_limit else None
-            )
-        else:
-            amount = self.settings.subscription_options.get(months)
+        renew_device_limit = sub.hwid_device_limit if sub.hwid_device_limit is not None else settings.base_device_limit
+        amount = (settings.get_plan_price(int(renew_device_limit), int(months))
+                  if renew_device_limit is not None else None)
         if not amount:
             logging.error(
                 f"Auto-renew price missing for {months} months / {renew_device_limit} devices"
@@ -1103,6 +1006,8 @@ class SubscriptionService:
             session,
             {
                 "user_id": sub.user_id,
+                "product_type": "subscription",
+                "purchase_value": months,
                 "amount": float(amount),
                 "currency": "RUB",
                 "status": "pending_yookassa",
@@ -1111,6 +1016,7 @@ class SubscriptionService:
                 "provider": "yookassa",
                 "hwid_device_limit": renew_device_limit,
             },
+            settings=self.settings,
         )
 
         metadata = {
@@ -1186,7 +1092,7 @@ class SubscriptionService:
             payload["status"] = status
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
-            payload["trafficLimitStrategy"] = traffic_limit_strategy or self.settings.USER_TRAFFIC_STRATEGY
+            payload["trafficLimitStrategy"] = "NO_RESET"
         if hwid_device_limit is not None:
             try:
                 hwid_int = int(hwid_device_limit)
@@ -1194,8 +1100,6 @@ class SubscriptionService:
                     payload["hwidDeviceLimit"] = hwid_int
             except (TypeError, ValueError):
                 pass
-        if self.settings.parsed_user_squad_uuids:
-            payload["activeInternalSquads"] = self.settings.parsed_user_squad_uuids
         if self.settings.parsed_user_external_squad_uuid:
             payload["externalSquadUuid"] = self.settings.parsed_user_external_squad_uuid
         return payload
@@ -1203,7 +1107,7 @@ class SubscriptionService:
     def _resolve_subscription_tier(self, sub: Optional[Subscription]) -> Optional[int]:
         if sub is None:
             return None
-        return sub.hwid_device_limit or self.settings.base_device_limit
+        return sub.hwid_device_limit if sub.hwid_device_limit is not None else self.settings.base_device_limit
 
     async def compute_switch_preview(
         self, session: AsyncSession, user_id: int, target_devices: int, months: int
@@ -1216,8 +1120,11 @@ class SubscriptionService:
         direction: 'new' (no active sub) | 'same' (same tier, time stacks) |
                    'upgrade' / 'downgrade' (tier change, days recalculated).
         """
+        settings = self.settings
         now = datetime.now(timezone.utc)
         active = await subscription_dal.get_active_subscription_by_user_id(session, user_id)
+        if active and active.end_date:
+            active.end_date = as_utc(active.end_date)
         purchased_days = (add_months(now, int(months)) - now).days
 
         if not active or not active.end_date or active.end_date <= now:
@@ -1238,8 +1145,8 @@ class SubscriptionService:
         remaining_days = max(0, (active.end_date - now).days)
 
         if (
-            not self.settings.device_plans_active
-            or not old_tier
+            not settings.device_plans_active
+            or old_tier is None
             or int(old_tier) == int(target_devices)
         ):
             total = remaining_days + purchased_days
@@ -1254,8 +1161,8 @@ class SubscriptionService:
                 "direction": "same",
             }
 
-        rate_old = self.settings.tier_monthly_rate(int(old_tier))
-        rate_new = self.settings.tier_monthly_rate(int(target_devices))
+        rate_old = settings.tier_monthly_rate(int(old_tier))
+        rate_new = settings.tier_monthly_rate(int(target_devices))
         if rate_old and rate_new:
             converted = int(round(remaining_days * rate_old / rate_new))
         else:

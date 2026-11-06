@@ -10,6 +10,7 @@ from . import logs_admin
 from . import payments
 from . import ads
 from . import currency_rates
+from . import lte_traffic
 
 admin_router_aggregate = Router(name="admin_features_router")
 
@@ -23,5 +24,6 @@ admin_router_aggregate.include_router(logs_admin.router)
 admin_router_aggregate.include_router(payments.router)
 admin_router_aggregate.include_router(ads.router)
 admin_router_aggregate.include_router(currency_rates.router)
+admin_router_aggregate.include_router(lte_traffic.router)
 
 __all__ = ("admin_router_aggregate", )

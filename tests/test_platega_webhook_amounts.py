@@ -117,7 +117,6 @@ def service():
         PLATEGA_RETURN_URL=None,
         PLATEGA_FAILED_URL=None,
         DEFAULT_LANGUAGE="ru",
-        traffic_sale_mode=False,
     )
 
     class _Bot:
@@ -249,3 +248,21 @@ async def test_cancellation_is_silent_but_chargeback_still_notifies(
         service.bot.send_message.assert_awaited_with(111, "payment_failed")
     else:
         service.bot.send_message.assert_not_awaited()
+
+
+async def test_lte_topup_uses_frozen_product_and_skips_referral_days(service, marked_calls, monkeypatch):
+    from unittest.mock import AsyncMock
+    payment = _payment()
+    payment.product_type = "lte_topup"
+    payment.lte_traffic_bytes = 25 * 2**30
+    payment.subscription_duration_months = 0
+    monkeypatch.setattr(payment_dal, "get_payment_by_provider_payment_id", AsyncMock(return_value=payment))
+    service.subscription_service.activate_subscription = AsyncMock(wraps=service.subscription_service.activate_subscription)
+    service.referral_service.apply_referral_bonuses_for_payment = AsyncMock()
+    response = await service.webhook_route(_FakeRequest(_confirmed(ORDER_AMOUNT)))
+    assert response.status == 200
+    call = service.subscription_service.activate_subscription.await_args
+    assert call.args[2] == 0
+    assert call.kwargs["sale_mode"] == "lte_topup"
+    assert call.kwargs["traffic_gb"] == 25
+    service.referral_service.apply_referral_bonuses_for_payment.assert_not_awaited()

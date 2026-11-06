@@ -1,16 +1,61 @@
 import logging
+import math
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, func, and_
+from sqlalchemy import update, func, and_, or_, case
 from sqlalchemy.orm import selectinload
 
+from config.settings import Settings
 from db.models import Payment
+from .lte_dal import GIB, traffic_bytes
+
+
+def _purchase_terms(settings: Optional[Settings], product_type: str, value: Any,
+                    devices: Optional[int], currency: str) -> Dict[str, Any]:
+    """Freeze environment-owned offer terms before an invoice is issued."""
+    if settings is None:
+        raise ValueError("Purchase settings are required")
+    if product_type == "lte_topup":
+        amount = traffic_bytes(value)
+        prices = settings.stars_traffic_packages if currency == "XTR" else settings.traffic_packages
+        price = prices.get(amount / GIB)
+        months, device_limit = 0, None
+    elif product_type == "subscription":
+        try:
+            period = Decimal(str(value))
+            if not period.is_finite() or period not in (1, 3, 6, 12):
+                raise ValueError("Invalid subscription period")
+            months = int(period)
+        except (InvalidOperation, TypeError) as exc:
+            raise ValueError("Invalid subscription period") from exc
+        if devices is None:
+            raise ValueError("A device tier is required")
+        price = (settings.get_plan_stars_price(devices, months) if currency == "XTR"
+                 else settings.get_plan_price(devices, months))
+        device_limit = devices
+        amount = settings.device_plan_lte_bytes[months]
+    else:
+        raise ValueError("Invalid payment product")
+    if price is None or not math.isfinite(float(price)) or price <= 0:
+        raise ValueError("Offer is unavailable in this currency")
+    return dict(product_type=product_type, original_amount=float(price),
+                lte_traffic_bytes=amount, subscription_duration_months=months,
+                hwid_device_limit=device_limit)
 
 
 async def create_payment_record(session: AsyncSession,
-                                payment_data: Dict[str, Any]) -> Payment:
-
+                                payment_data: Dict[str, Any], *, settings: Optional[Settings] = None) -> Payment:
+    payment_data = dict(payment_data)
+    purchase_value = payment_data.pop("purchase_value", payment_data.get("subscription_duration_months"))
+    if "product_type" in payment_data:
+        payment_data.update(_purchase_terms(
+            settings, payment_data["product_type"], purchase_value,
+            payment_data.get("hwid_device_limit"), payment_data.get("currency", "RUB")))
+        discount = payment_data["original_amount"] - float(payment_data["amount"])
+        payment_data["discount_applied"] = round(discount, 2) if discount > 0 else None
     from .user_dal import get_user_by_id
     user = await get_user_by_id(session, payment_data["user_id"])
     if not user:
@@ -18,6 +63,8 @@ async def create_payment_record(session: AsyncSession,
         raise ValueError(
             f"User with id {payment_data['user_id']} not found for creating payment."
         )
+    if payment_data.get("product_type") == "lte_topup" and not user.panel_user_uuid:
+        raise ValueError("A traffic purchase requires an existing subscription account")
 
     if payment_data.get("promo_code_id"):
         from .promo_code_dal import get_promo_code_by_id
@@ -184,8 +231,15 @@ async def get_payment_by_db_id(session: AsyncSession,
 
 async def get_unconfirmed_provider_payment(
         session: AsyncSession, *, user_id: int, provider: str, amount: float,
-        currency: str, months: int, device_limit: Optional[int]) -> Optional[Payment]:
+        currency: str, months: int, device_limit: Optional[int],
+        product_type: Optional[str] = None, lte_traffic_bytes: Optional[int] = None) -> Optional[Payment]:
     """Reuse an identical attempt whose upstream creation result is unknown."""
+    device_match = Payment.hwid_device_limit == device_limit
+    if product_type == "subscription" and device_limit == 0:
+        device_match = or_(
+            Payment.hwid_device_limit == 0,
+            Payment.hwid_device_limit.is_(None),
+        )
     stmt = (
         select(Payment)
         .where(
@@ -194,12 +248,16 @@ async def get_unconfirmed_provider_payment(
             Payment.status == f"pending_{provider}_unknown",
             Payment.amount == amount,
             Payment.currency == currency,
-            Payment.subscription_duration_months == months,
-            Payment.hwid_device_limit == device_limit,
+            Payment.subscription_duration_months == (0 if product_type == "lte_topup" else months),
+            device_match,
         )
         .order_by(Payment.payment_id.desc())
         .limit(1)
     )
+    if product_type is not None:
+        stmt = stmt.where(Payment.product_type == product_type)
+    if lte_traffic_bytes is not None:
+        stmt = stmt.where(Payment.lte_traffic_bytes == lte_traffic_bytes)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -278,7 +336,8 @@ async def get_all_succeeded_payments_with_user(session: AsyncSession) -> List[Pa
 
 
 async def count_user_succeeded_payments(
-    session: AsyncSession, user_id: int, exclude_payment_id: Optional[int] = None
+    session: AsyncSession, user_id: int, exclude_payment_id: Optional[int] = None,
+    product_type: Optional[str] = None,
 ) -> int:
     """Count succeeded payments for a specific user.
 
@@ -287,6 +346,8 @@ async def count_user_succeeded_payments(
     current payment in the same transaction.
     """
     conditions = [Payment.user_id == user_id, Payment.status == 'succeeded']
+    if product_type is not None:
+        conditions.append(Payment.product_type == product_type)
     if exclude_payment_id is not None:
         conditions.append(Payment.payment_id != exclude_payment_id)
     stmt = select(func.count(Payment.payment_id)).where(and_(*conditions))
@@ -457,8 +518,6 @@ async def update_payment_discount_info(
 
 async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
     """Get comprehensive financial statistics."""
-    from datetime import datetime, timedelta
-    from sqlalchemy import and_
     
     now = datetime.utcnow()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -510,6 +569,31 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
     )
     today_count = await session.execute(stmt_count_today)
     today_payments_count = today_count.scalar() or 0
+
+    # Package sales are already included in the totals above. Aggregate their
+    # breakdown using the same UTC boundaries and frozen base-currency amounts.
+    periods = {"today": today_start, "week": week_start,
+               "month": month_start, "all_time": None}
+    columns = []
+    for period, start in periods.items():
+        in_period = Payment.created_at >= start if start is not None else True
+        columns.extend([
+            func.count(case((in_period, Payment.payment_id))).label(f"{period}_count"),
+            func.sum(case((in_period, Payment.lte_traffic_bytes), else_=0)).label(f"{period}_traffic_bytes"),
+            func.sum(case((in_period, Payment.base_amount), else_=0)).label(f"{period}_revenue"),
+            func.count(case((and_(in_period, Payment.base_amount.is_(None)), Payment.payment_id)))
+                .label(f"{period}_unvalued_count"),
+        ])
+    sales_result = await session.execute(select(*columns).where(
+        Payment.status == "succeeded", Payment.product_type == "lte_topup"
+    ))
+    sales = sales_result.mappings().one()
+    lte_topups = {period: {
+        "count": int(sales[f"{period}_count"] or 0),
+        "traffic_bytes": int(sales[f"{period}_traffic_bytes"] or 0),
+        "revenue": float(sales[f"{period}_revenue"] or 0),
+        "unvalued_count": int(sales[f"{period}_unvalued_count"] or 0),
+    } for period in periods}
     
     return {
         "today_revenue": float(today_amount),
@@ -518,6 +602,7 @@ async def get_financial_statistics(session: AsyncSession) -> Dict[str, Any]:
         "all_time_revenue": float(all_amount),
         "today_payments_count": today_payments_count,
         "unvalued_payments": await count_unvalued_payments(session),
+        "lte_topups": lte_topups,
     }
 
 

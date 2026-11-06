@@ -114,7 +114,7 @@ async def pay_severpay_callback_handler(
     human_value = str(int(months)) if float(months).is_integer() else f"{months:g}"
     payment_description = (
         get_text("payment_description_traffic", traffic_gb=human_value)
-        if sale_mode == "traffic"
+        if sale_mode == "lte_topup"
         else get_text("payment_description_subscription", months=int(months))
     )
     currency_code = "RUB"
@@ -130,13 +130,15 @@ async def pay_severpay_callback_handler(
         "status": "pending_severpay",
         "description": payment_description,
         "subscription_duration_months": int(months),
+        "product_type": sale_mode,
+        "purchase_value": months,
         "provider": "severpay",
         "promo_code_id": None,
-        "hwid_device_limit": devices if sale_mode != "traffic" else None,
+        "hwid_device_limit": devices if sale_mode != "lte_topup" else None,
     }
 
     try:
-        payment_record = await payment_dal.create_payment_record(session, payment_record_payload)
+        payment_record = await payment_dal.create_payment_record(session, payment_record_payload, settings=settings)
         await session.commit()
     except Exception as e_db_create:
         await session.rollback()
@@ -193,7 +195,7 @@ async def pay_severpay_callback_handler(
             try:
                 await safe_edit_text(callback.message, 
                     get_text(
-                        key="payment_link_message_traffic" if sale_mode == "traffic" else "payment_link_message",
+                        key="payment_link_message_traffic" if sale_mode == "lte_topup" else "payment_link_message",
                         months=int(months),
                         traffic_gb=human_value,
                     ),
@@ -201,7 +203,7 @@ async def pay_severpay_callback_handler(
                         payment_link,
                         current_lang,
                         i18n,
-                        back_callback=offer_back_callback(devices, months),
+                        back_callback=offer_back_callback(devices, months, sale_mode),
                         back_text_key="back_to_payment_methods_button",
                     ),
                     disable_web_page_preview=False,
@@ -211,7 +213,7 @@ async def pay_severpay_callback_handler(
                 try:
                     await callback.message.answer(
                         get_text(
-                            key="payment_link_message_traffic" if sale_mode == "traffic" else "payment_link_message",
+                            key="payment_link_message_traffic" if sale_mode == "lte_topup" else "payment_link_message",
                             months=int(months),
                             traffic_gb=human_value,
                         ),
@@ -219,7 +221,7 @@ async def pay_severpay_callback_handler(
                             payment_link,
                             current_lang,
                             i18n,
-                            back_callback=offer_back_callback(devices, months),
+                            back_callback=offer_back_callback(devices, months, sale_mode),
                             back_text_key="back_to_payment_methods_button",
                         ),
                         disable_web_page_preview=False,

@@ -120,7 +120,7 @@ async def user_search_prompt_handler(callback: types.CallbackQuery,
 
 
 def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
-                           referrer_id: Optional[int] = None) -> InlineKeyboardBuilder:
+                           referrer_id: Optional[int] = None, settings: Optional[Settings] = None) -> InlineKeyboardBuilder:
     """Generate keyboard for user management actions"""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
@@ -136,7 +136,7 @@ def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
         callback_data=f"user_action:add_subscription:{user_id}",
         icon_custom_emoji_id=PREMIUM_EMOJI_ADD,
     )
-    has_tariff_button = get_settings().device_plans_active
+    has_tariff_button = (settings or get_settings()).device_plans_active
     if has_tariff_button:
         builder.button(
             text=_(key="admin_user_set_tariff_button"),
@@ -169,6 +169,12 @@ def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
     )
 
     # Row 4: Quick links
+    builder.button(
+        text=_(key="admin_lte_button"),
+        callback_data=f"admin_lte:show:{user_id}",
+        icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+    )
+
     builder.button(
         text=_(key="user_card_open_profile_button"),
         url=f"tg://user?id={user_id}",
@@ -203,9 +209,9 @@ def get_user_card_keyboard(user_id: int, i18n_instance, lang: str,
     quick_links_width = 2 if referrer_id else 1
     if has_tariff_button:
         # Extra "Change plan" button gets its own row to keep the layout tidy.
-        builder.adjust(2, 1, 2, 2, quick_links_width, 1, 2)
+        builder.adjust(2, 1, 2, 2, 1, quick_links_width, 1, 2)
     else:
-        builder.adjust(2, 2, 2, quick_links_width, 1, 2)
+        builder.adjust(2, 2, 2, 1, quick_links_width, 1, 2)
     return builder
 
 
@@ -407,7 +413,8 @@ async def process_user_search_handler(message: types.Message, state: FSMContext,
             user_model.user_id,
             i18n,
             current_lang,
-            user_model.referred_by_id
+            user_model.referred_by_id,
+            settings=settings,
         )
         
         await _send_with_profile_link_fallback(
@@ -739,15 +746,16 @@ async def handle_refresh_user_card(callback: types.CallbackQuery, user: User,
             await callback.answer("User not found", show_alert=True)
             return
         
-        from config.settings import Settings as _Settings
-        _settings = _Settings()
+        settings = subscription_service.settings
+        _settings = settings
         referral_service = ReferralService(_settings, subscription_service, callback.message.bot, i18n_instance)
         user_card_text = await format_user_card(fresh_user, session, subscription_service, i18n_instance, lang, referral_service)
         keyboard = get_user_card_keyboard(
             fresh_user.user_id,
             i18n_instance,
             lang,
-            fresh_user.referred_by_id
+            fresh_user.referred_by_id,
+            settings=settings,
         )
         markup = keyboard.as_markup()
         
@@ -1021,7 +1029,8 @@ async def process_subscription_days_handler(message: types.Message, state: FSMCo
                     user.user_id,
                     i18n,
                     current_lang,
-                    user.referred_by_id
+                    user.referred_by_id,
+                    settings=settings,
                 )
                 
                 await _send_with_profile_link_fallback(
@@ -1130,7 +1139,8 @@ async def process_direct_message_handler(message: types.Message, state: FSMConte
                 target_user.user_id,
                 i18n,
                 current_lang,
-                target_user.referred_by_id
+                target_user.referred_by_id,
+                settings=settings,
             )
             
             await _send_with_profile_link_fallback(
@@ -1423,7 +1433,8 @@ async def user_card_from_list_handler(callback: types.CallbackQuery,
         user_id,
         i18n,
         current_lang,
-        user.referred_by_id
+        user.referred_by_id,
+        settings=settings,
     )
     keyboard.button(
         text=_("admin_user_back_to_list_button"),

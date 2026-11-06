@@ -94,7 +94,6 @@ def _settings(enabled=True, project=PROJECT_ID, key=API_KEY, webhook_base="https
         PAY2328_SUCCESS_URL=None,
         pay2328_full_webhook_url=(f"{webhook_base}/webhook/2328" if webhook_base else None),
         DEFAULT_LANGUAGE="ru",
-        traffic_sale_mode=False,
     )
 
 
@@ -930,3 +929,20 @@ async def test_pending_webhook_preserves_recovery_of_lost_creation_response(stat
             assert retry.provider_payment_id == "invoice-uuid-1"
     finally:
         await engine.dispose()
+
+
+async def test_lte_topup_uses_frozen_product_and_skips_referral_days(webhook_env):
+    payment = webhook_env["payment"]
+    payment.product_type = "lte_topup"
+    payment.lte_traffic_bytes = 25 * 2**30
+    payment.subscription_duration_months = 0
+    service = _service()
+    service.subscription_service.activate_subscription = AsyncMock(wraps=service.subscription_service.activate_subscription)
+    service.referral_service.apply_referral_bonuses_for_payment = AsyncMock()
+    response = await service.webhook_route(_FakeRequest(_signed_webhook()))
+    assert response.status == 200
+    call = service.subscription_service.activate_subscription.await_args
+    assert call.args[2] == 0
+    assert call.kwargs["sale_mode"] == "lte_topup"
+    assert call.kwargs["traffic_gb"] == 25
+    service.referral_service.apply_referral_bonuses_for_payment.assert_not_awaited()

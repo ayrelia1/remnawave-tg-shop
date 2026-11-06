@@ -1,4 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+
+def as_utc(value: datetime) -> datetime:
+    """Interpret legacy naive database timestamps as UTC."""
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def add_months(base_dt: datetime, months_to_add: int) -> datetime:

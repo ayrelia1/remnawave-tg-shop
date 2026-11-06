@@ -210,6 +210,18 @@ async def show_statistics_handler(callback: types.CallbackQuery,
         f"🏆 {_('admin_financial_all_time_label')}: <b>{financial_stats['all_time_revenue']:.2f} {BASE_CURRENCY}</b>"
     )
 
+    stats_text_parts.append("\n" + _("admin_lte_sales_header"))
+    lte_sales = financial_stats["lte_topups"]
+    for period in ("today", "week", "month", "all_time"):
+        sales = lte_sales[period]
+        gb = f"{sales['traffic_bytes'] / 2**30:.2f}".rstrip("0").rstrip(".")
+        stats_text_parts.append(_(
+            "admin_lte_sales_period", period=_(f"admin_financial_{period}_label"),
+            count=sales["count"], gb=gb, revenue=f"{sales['revenue']:.2f}", currency=BASE_CURRENCY,
+        ))
+    if lte_sales["all_time"]["unvalued_count"]:
+        stats_text_parts.append(_("admin_lte_sales_unvalued", count=lte_sales["all_time"]["unvalued_count"]))
+
     last_payments_models: List[
         Payment] = await payment_dal.get_recent_payment_logs_with_user(session,
                                                                        limit=5)

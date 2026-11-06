@@ -139,6 +139,8 @@ async def perform_sync(
                                 session, user_data
                             )
                             if was_created:
+                                from db.models import LteAccount
+                                session.add(LteAccount(user_id=telegram_id_from_panel))
                                 users_created += 1
                                 logging.info(
                                     f"Created new user {telegram_id_from_panel} from panel sync with UUID {panel_uuid}"
@@ -182,32 +184,8 @@ async def perform_sync(
                         f"Updated panel reference for user {actual_user_id}: {panel_uuid}"
                     )
 
-                # Ensure panel description contains Telegram fields
-                try:
-                    if panel_uuid and existing_user:
-                        description_text = "\n".join(
-                            [
-                                existing_user.username or "",
-                                existing_user.first_name or "",
-                                existing_user.last_name or "",
-                            ]
-                        )
-                        # Update description only when it differs from the current one on panel
-                        current_panel_description = (
-                            panel_user_dict.get("description") or ""
-                        ).strip()
-                        desired_description = description_text.strip()
-                        if (
-                            desired_description
-                            and desired_description != current_panel_description
-                        ):
-                            await panel_service.update_user_details_on_panel(
-                                panel_uuid, {"description": description_text}
-                            )
-                except Exception as e_desc:
-                    logging.warning(
-                        f"Sync: Failed to update description for panel user {panel_uuid} (tg {actual_user_id}): {e_desc}"
-                    )
+                # LTE synchronization owns panel descriptions. A bulk sync
+                # snapshot must not overwrite a more recent balance projection.
 
                 # Sync subscription data
                 panel_expire_at_iso = panel_user_dict.get("expireAt")

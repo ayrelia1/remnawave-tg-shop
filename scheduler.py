@@ -31,6 +31,7 @@ from bot.services.panel_api_service import PanelApiService
 from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
 from bot.services.name_bonus_service import NameBonusService
+from bot.services.lte_service import LteService
 from bot.utils.message_queue import init_queue_manager
 from config.logging_config import setup_logging
 
@@ -67,6 +68,14 @@ async def run_scheduler():
     name_bonus_service = NameBonusService(settings, bot, panel_service, i18n)
 
     scheduler = AsyncIOScheduler()
+
+    lte_service = LteService(settings, panel_service, bot, i18n)
+    async def job_lte():
+        await lte_service.run_checks(session_factory)
+
+    scheduler.add_job(job_lte, IntervalTrigger(seconds=settings.LTE_CHECK_INTERVAL_SECONDS),
+                      id="lte_traffic", name="LTE credit synchronization",
+                      replace_existing=True, coalesce=True, max_instances=1)
 
     # --- Backup: daily at BACKUP_HOUR ---
     async def job_backup():

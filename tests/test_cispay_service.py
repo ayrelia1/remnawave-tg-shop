@@ -7,12 +7,30 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from unittest.mock import AsyncMock
 
 from bot.services import cispay_service as cispay_module
 from bot.services.cispay_service import CisPayService
 from bot.keyboards.inline.user_keyboards import get_payment_method_keyboard
 from config.settings import Settings
 from db.dal import payment_dal, user_dal
+
+
+async def test_lte_topup_uses_frozen_product_and_skips_referral_days(webhook_env):
+    service, payment, _ = webhook_env
+    payment.product_type = "lte_topup"
+    payment.lte_traffic_bytes = 25 * 2**30
+    payment.subscription_duration_months = 0
+    service.subscription_service.activate_subscription = AsyncMock(
+        wraps=service.subscription_service.activate_subscription)
+    service.referral_service.apply_referral_bonuses_for_payment = AsyncMock()
+    response = await service.webhook_route(_signed_request(_webhook_payload()))
+    assert response.status == 200
+    call = service.subscription_service.activate_subscription.await_args
+    assert call.args[2] == 0
+    assert call.kwargs["sale_mode"] == "lte_topup"
+    assert call.kwargs["traffic_gb"] == 25
+    service.referral_service.apply_referral_bonuses_for_payment.assert_not_awaited()
 
 
 SHOP_ID = "0198f26a-f8a1-7000-8000-000000000001"
@@ -105,7 +123,6 @@ def _settings():
         CISPAY_RETURN_URL="https://t.me/test_bot?start=paid",
         CISPAY_FAILED_URL="https://t.me/test_bot?start=failed",
         DEFAULT_LANGUAGE="ru",
-        traffic_sale_mode=False,
     )
 
 

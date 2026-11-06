@@ -32,7 +32,7 @@ from db.models import (  # noqa: E402
 )
 
 MIGRATIONS = REPO_ROOT / "alembic" / "versions"
-HEAD = "0009_name_bonus_claims"
+HEAD = "0011_lte_admin_alerts"
 
 
 @pytest.fixture(scope="module")

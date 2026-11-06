@@ -59,10 +59,7 @@ async def db_session_factory():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(
-                sync_conn,
-                tables=[User.__table__, Payment.__table__, Subscription.__table__, NameBonusClaim.__table__],
-            )
+            Base.metadata.create_all
         )
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory
@@ -78,6 +75,7 @@ def make_service(bot=None, panel=None):
         base_device_limit=1,
         USER_TRAFFIC_STRATEGY="NO_RESET",
         DEFAULT_LANGUAGE="ru",
+        STARS_ENABLED=False,
     )
     return NameBonusService(settings, bot, panel, FakeI18n())
 
@@ -549,6 +547,8 @@ async def test_admin_statistics_displays_bonus_totals(db_session_factory, monkey
         return {
             "today_revenue": 0, "today_payments_count": 0,
             "week_revenue": 0, "month_revenue": 0, "all_time_revenue": 0,
+            "lte_topups": {period: {"count": 0, "traffic_bytes": 0, "revenue": 0, "unvalued_count": 0}
+                           for period in ("today", "week", "month", "all_time")},
         }
 
     async def empty_result(session, *args, **kwargs):

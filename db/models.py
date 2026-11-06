@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger, Index, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger, Index, text, CheckConstraint
 from sqlalchemy.orm import relationship, DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.sql import expression, func
@@ -119,6 +119,8 @@ class Payment(Base):
     status = Column(String, nullable=False, index=True)
     description = Column(String, nullable=True)
     subscription_duration_months = Column(Integer, nullable=True)
+    product_type = Column(String(24), nullable=False, default="subscription", server_default="subscription", index=True)
+    lte_traffic_bytes = Column(BigInteger, nullable=True)
     # Device tier (hwidDeviceLimit) this payment was made for, if applicable.
     hwid_device_limit = Column(Integer, nullable=True)
     promo_code_id = Column(Integer,
@@ -132,6 +134,43 @@ class Payment(Base):
     user = relationship("User", back_populates="payments")
     promo_code_used = relationship("PromoCode",
                                    back_populates="payments_where_used")
+
+
+class LteAccount(Base):
+    __tablename__ = "lte_accounts"
+    __table_args__ = (
+        CheckConstraint("credited_bytes >= 0 AND used_bytes >= 0", name="ck_lte_account_bytes"),
+        Index("ix_lte_accounts_managed_user", "managed", "user_id"),
+    )
+    user_id = Column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    # Existing users are inserted with managed=False by the migration.
+    managed = Column(Boolean, nullable=False, default=True, server_default=expression.true())
+    credited_bytes = Column(BigInteger, nullable=False, default=0)
+    used_bytes = Column(BigInteger, nullable=False, default=0)
+    last_panel_counter = Column(BigInteger, nullable=True)
+    panel_user_ref = Column(String, nullable=True)
+    access_sync_pending = Column(Boolean, nullable=False, default=True)
+    access_enabled = Column(Boolean, nullable=True)
+    depleted_notified = Column(Boolean, nullable=False, default=False)
+    notification_pending = Column(Boolean, nullable=False, default=False)
+    low_notified = Column(Boolean, nullable=False, default=False, server_default=expression.false())
+    low_notification_pending = Column(Boolean, nullable=False, default=False, server_default=expression.false())
+
+    @property
+    def remaining_bytes(self) -> int:
+        return max(0, self.credited_bytes - self.used_bytes)
+
+
+class LteGrant(Base):
+    __tablename__ = "lte_grants"
+    __table_args__ = (CheckConstraint(
+        "traffic_bytes >= 0 OR (payment_id IS NULL AND source LIKE 'admin:%')", name="ck_lte_grant_bytes"),)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    source = Column(String(80), nullable=False, unique=True)
+    payment_id = Column(Integer, ForeignKey("payments.payment_id", ondelete="SET NULL"), nullable=True, unique=True)
+    traffic_bytes = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class NameBonusClaim(Base):

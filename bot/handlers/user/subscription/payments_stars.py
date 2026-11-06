@@ -69,7 +69,7 @@ async def pay_stars_callback_handler(
     human_value = str(int(months)) if float(months).is_integer() else f"{months:g}"
     payment_description = (
         get_text("payment_description_traffic", traffic_gb=human_value)
-        if sale_mode == "traffic"
+        if sale_mode == "lte_topup"
         else get_text("payment_description_subscription", months=int(months))
     )
 
@@ -88,7 +88,7 @@ async def pay_stars_callback_handler(
         try:
             await safe_edit_text(callback.message, 
                 get_text(
-                    "payment_invoice_sent_message_traffic" if sale_mode == "traffic" else "payment_invoice_sent_message",
+                    "payment_invoice_sent_message_traffic" if sale_mode == "lte_topup" else "payment_invoice_sent_message",
                     months=int(months),
                     traffic_gb=human_value,
                 ),
@@ -97,7 +97,7 @@ async def pay_stars_callback_handler(
                         [
                             InlineKeyboardButton(
                                 text=get_text("back_to_payment_methods_button"),
-                                callback_data=offer_back_callback(devices, months),
+                                callback_data=offer_back_callback(devices, months, sale_mode),
                                 icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
                             )
                         ],

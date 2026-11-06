@@ -18,6 +18,48 @@ from config.settings import Settings
 router = Router(name="user_subscription_payments_selection_router")
 
 
+@router.callback_query(F.data == "lte:packages")
+async def show_lte_packages(callback: types.CallbackQuery, settings: Settings,
+                            i18n_data: dict, session: AsyncSession):
+    from db.dal.subscription_dal import has_any_subscription_for_user
+    from bot.keyboards.inline.user_keyboards import get_lte_packages_keyboard
+    i18n = i18n_data.get("i18n_instance")
+    lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    if not i18n or not callback.message:
+        await callback.answer()
+        return
+    if not await has_any_subscription_for_user(session, callback.from_user.id):
+        await callback.answer(i18n.gettext(lang, "lte_subscription_required"), show_alert=True)
+        return
+    options = {**settings.stars_traffic_packages, **settings.traffic_packages}
+    currencies = {gb: "RUB" if gb in settings.traffic_packages else "⭐" for gb in options}
+    text = i18n.gettext(lang, "select_traffic_package" if options else "lte_no_packages_message")
+    markup = get_lte_packages_keyboard(options, "RUB", lang, i18n, currencies=currencies)
+    await safe_edit_text(callback.message, text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("lte_package:"))
+async def select_lte_package(callback: types.CallbackQuery, settings: Settings,
+                              i18n_data: dict, session: AsyncSession, promo_code_service=None):
+    i18n = i18n_data.get("i18n_instance")
+    lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    if not i18n or not callback.message:
+        await callback.answer()
+        return
+    try:
+        gb = float(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        gb = None
+    if gb not in settings.traffic_packages and gb not in settings.stars_traffic_packages:
+        await callback.answer(i18n.gettext(lang, "lte_no_packages"), show_alert=True)
+        return
+    await _show_payment_methods_screen(
+        callback, settings=settings, i18n=i18n, current_lang=lang,
+        get_text=lambda key, **kw: i18n.gettext(lang, key, **kw), session=session,
+        months=gb, devices=None, traffic_mode=True, promo_code_service=promo_code_service)
+
+
 def _format_units(val: float) -> str:
     return str(int(val)) if float(val).is_integer() else f"{val:g}"
 
@@ -25,25 +67,41 @@ def _format_units(val: float) -> str:
 def parse_simple_offer(data_payload: str):
     """Parse a pay_* offer payload.
 
-    4-part = device-tier mode (devices:value:price:mode);
-    3-part = legacy/traffic (value:price:mode).
-    Returns (devices, value, price, sale_mode) with devices None in legacy/traffic.
+    4-part = subscription (devices:value:price:mode);
+    3-part = LTE top-up (value:price:mode).
+    Returns (devices, value, price, sale_mode).
     """
     parts = data_payload.split(":")
     try:
-        if len(parts) >= 4:
-            return int(float(parts[0])), float(parts[1]), float(parts[2]), parts[3]
-        return None, float(parts[0]), float(parts[1]), parts[2] if len(parts) > 2 else "subscription"
-    except (ValueError, IndexError):
+        if len(parts) == 4:
+            devices_raw = float(parts[0])
+            if not math.isfinite(devices_raw) or not devices_raw.is_integer() or devices_raw < 0:
+                return None
+            devices, value, price, mode = int(devices_raw), float(parts[1]), float(parts[2]), parts[3]
+        elif len(parts) == 3:
+            devices, value, price, mode = None, float(parts[0]), float(parts[1]), parts[2]
+        else:
+            return None
+        if (mode not in {"subscription", "lte_topup"} or not math.isfinite(value)
+                or not math.isfinite(price) or value <= 0 or price < 0):
+            return None
+        if mode == "subscription" and (devices is None or devices <= 0 or value not in {1, 3, 6, 12}):
+            return None
+        if mode == "lte_topup" and (devices is not None or not value.is_integer()):
+            return None
+        return devices, value, price, mode
+    except (ValueError, IndexError, OverflowError):
         return None
 
 
-def offer_back_callback(devices, value) -> str:
+def offer_back_callback(devices, value, sale_mode="subscription") -> str:
     """Build the back-to-period callback for a payment screen."""
     value_str = _format_units(value)
+    if sale_mode == "lte_topup":
+        return f"lte_package:{value_str}"
     if devices is not None:
         return f"subscribe_period:{int(devices)}:{value_str}"
-    return f"subscribe_period:{value_str}"
+    return "main_action:subscribe"
 
 
 async def ensure_panel_available_or_alert(
@@ -82,12 +140,14 @@ async def resolve_fiat_offer_price_for_user(
     devices: Optional[int] = None,
 ) -> Optional[float]:
     """Resolve offer price server-side to prevent callback payload tampering."""
-    if sale_mode == "traffic":
+    if sale_mode not in {"subscription", "lte_topup"}:
+        return None
+    if sale_mode == "subscription" and devices is None:
+        return None
+    if sale_mode == "lte_topup":
         base_price = (getattr(settings, "traffic_packages", {}) or {}).get(months)
-    elif devices is not None and settings.device_plans_active:
-        base_price = settings.get_plan_price(int(devices), int(months))
     else:
-        base_price = (settings.subscription_options or {}).get(months)
+        base_price = settings.get_plan_price(int(devices), int(months))
     if base_price is None:
         return None
 
@@ -120,15 +180,11 @@ async def _show_payment_methods_screen(
     if traffic_mode:
         price_rub = (getattr(settings, "traffic_packages", {}) or {}).get(months)
         stars_price = (getattr(settings, "stars_traffic_packages", {}) or {}).get(months)
-        price_source = getattr(settings, "traffic_packages", {}) or {}
-    elif devices is not None and settings.device_plans_active:
+    elif devices is not None:
         price_rub = settings.get_plan_price(int(devices), int(months))
         stars_price = settings.get_plan_stars_price(int(devices), int(months))
-        price_source = settings.device_subscription_options.get(int(devices), {})
     else:
-        price_rub = (settings.subscription_options or {}).get(months)
-        stars_price = (settings.stars_subscription_options or {}).get(months)
-        price_source = settings.subscription_options or {}
+        price_rub = stars_price = None
 
     currency_symbol_val = "RUB"
     discount_text = ""
@@ -171,40 +227,13 @@ async def _show_payment_methods_screen(
                         currency_symbol="⭐",
                     )
 
-    if price_rub is None:
-        if traffic_mode and not price_source and stars_price is not None:
-            currency_methods_enabled = any(
-                [
-                    settings.FREEKASSA_ENABLED,
-                    settings.PLATEGA_ENABLED,
-                    settings.CISPAY_ENABLED,
-                    settings.SEVERPAY_ENABLED,
-                    settings.YOOKASSA_ENABLED,
-                    settings.CRYPTOPAY_ENABLED,
-                ]
-            )
-            if currency_methods_enabled:
-                logging.error(
-                    "Currency price missing for traffic option %s while fiat providers are enabled.",
-                    months,
-                )
-                try:
-                    await callback.answer(get_text("error_try_again"), show_alert=True)
-                except Exception as exc:
-                    logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
-                return
-            price_rub = 0.0
-            currency_symbol_val = "⭐"
-        else:
-            logging.error(
-                "Price not found for option %s (devices=%s, traffic=%s).",
-                months, devices, traffic_mode,
-            )
-            try:
-                await callback.answer(get_text("error_try_again"), show_alert=True)
-            except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
-            return
+    if price_rub is None and stars_price is None:
+        logging.error(
+            "Price not found for option %s (devices=%s, traffic=%s).",
+            months, devices, traffic_mode,
+        )
+        await callback.answer(get_text("error_try_again"), show_alert=True)
+        return
 
     text_content = get_text("choose_payment_method_traffic") if traffic_mode else get_text("choose_payment_method")
     if discount_text:
@@ -218,7 +247,7 @@ async def _show_payment_methods_screen(
         current_lang,
         i18n,
         settings,
-        sale_mode="traffic" if traffic_mode else "subscription",
+        sale_mode="lte_topup" if traffic_mode else "subscription",
         devices=devices,
     )
 
@@ -236,12 +265,17 @@ async def _show_payment_methods_screen(
 
 
 def _parse_period_callback(data: str):
-    """Parse subscribe_period payload. Returns (devices, value) where devices is
-    None in legacy/traffic mode (1 segment) and set in device mode (2 segments)."""
+    """Parse a subscription device tier and duration."""
     parts = data.split(":")[1:]
-    if len(parts) >= 2:
-        return int(float(parts[0])), float(parts[1])
-    return None, float(parts[0])
+    if len(parts) != 2:
+        raise ValueError("Invalid subscription offer")
+    devices_raw, value = float(parts[0]), float(parts[1])
+    if not math.isfinite(devices_raw) or not devices_raw.is_integer() or devices_raw <= 0:
+        raise ValueError("Invalid device count")
+    devices = int(devices_raw)
+    if value not in {1, 3, 6, 12}:
+        raise ValueError("Invalid subscription period")
+    return devices, value
 
 
 @router.callback_query(F.data.startswith("subscribe_period:"))
@@ -264,8 +298,6 @@ async def select_subscription_period_callback_handler(
             logging.debug("Suppressed exception in bot/handlers/user/subscription/payments_subscription.py: %s", exc)
         return
 
-    stars_traffic_packages = getattr(settings, "stars_traffic_packages", {}) or {}
-    traffic_mode = bool(getattr(settings, "traffic_sale_mode", False) or stars_traffic_packages)
     try:
         devices, months = _parse_period_callback(callback.data)
     except (ValueError, IndexError):
@@ -279,9 +311,7 @@ async def select_subscription_period_callback_handler(
     # Device-tier switch preview: warn before payment when switching to a
     # different tier (days will be recalculated value-preserving).
     if (
-        not traffic_mode
-        and devices is not None
-        and settings.device_plans_active
+        settings.device_plans_active
         and subscription_service is not None
     ):
         preview = await subscription_service.compute_switch_preview(
@@ -329,7 +359,7 @@ async def select_subscription_period_callback_handler(
         session=session,
         months=months,
         devices=devices,
-        traffic_mode=traffic_mode,
+        traffic_mode=False,
         promo_code_service=promo_code_service,
     )
 

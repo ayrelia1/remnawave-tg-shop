@@ -29,35 +29,17 @@ class StarsService:
         self.referral_service = referral_service
 
     def _resolve_base_stars_price(
-        self, months: float, sale_mode: str, device_limit: Optional[int] = None
+        self, months: float, sale_mode: str, device_limit: Optional[int] = None, settings=None
     ) -> Optional[int]:
-        # Device-tier pricing takes precedence when enabled.
-        if (
-            sale_mode != "traffic"
-            and self.settings.device_plans_active
-            and device_limit
-            and float(months).is_integer()
-        ):
-            tier_price = self.settings.get_plan_stars_price(int(device_limit), int(months))
-            return tier_price
-
-        stars_price_source = (
-            self.settings.stars_traffic_packages
-            if sale_mode == "traffic"
-            else self.settings.stars_subscription_options
-        )
-
-        if sale_mode != "traffic":
-            months_key = int(months) if float(months).is_integer() else months
-            base_price = stars_price_source.get(months_key)
-            if base_price is not None:
-                return base_price
-
-            if float(months).is_integer():
-                return stars_price_source.get(float(months_key))
-
+        settings = settings or self.settings
+        if sale_mode == "subscription":
+            if device_limit is None or not float(months).is_integer():
+                return None
+            return settings.get_plan_stars_price(int(device_limit), int(months))
+        if sale_mode != "lte_topup":
             return None
 
+        stars_price_source = settings.stars_traffic_packages
         base_price = stars_price_source.get(months)
         if base_price is not None:
             return base_price
@@ -72,7 +54,10 @@ class StarsService:
                              stars_price: int, description: str, sale_mode: str = "subscription",
                              promo_code_service=None, device_limit: Optional[int] = None) -> Optional[int]:
         # Always resolve base price server-side and reject unknown packages.
-        resolved_base_price = self._resolve_base_stars_price(months, sale_mode, device_limit)
+        settings = self.settings
+        if sale_mode == "subscription" and device_limit is None:
+            return None
+        resolved_base_price = self._resolve_base_stars_price(months, sale_mode, device_limit, settings)
         if resolved_base_price is None:
             logging.warning(
                 "Stars invoice rejected: base price not found for sale_mode=%s months=%s.",
@@ -126,13 +111,15 @@ class StarsService:
             "status": "pending_stars",
             "description": description,
             "subscription_duration_months": int(months),
+            "product_type": sale_mode,
+            "purchase_value": months,
             "provider": "telegram_stars",
             "promo_code_id": promo_code_id,
-            "hwid_device_limit": device_limit if sale_mode != "traffic" else None,
+            "hwid_device_limit": device_limit if sale_mode != "lte_topup" else None,
         }
         try:
             db_payment_record = await payment_dal.create_payment_record(
-                session, payment_record_data)
+                session, payment_record_data, settings=self.settings)
             await session.commit()
         except Exception as e_db:
             await session.rollback()
@@ -167,6 +154,13 @@ class StarsService:
                                          sale_mode: str = "subscription") -> None:
         # Fetch payment record to get promo_code_id and device tier
         payment_record = await payment_dal.get_payment_by_db_id(session, payment_db_id)
+        if (not payment_record or payment_record.user_id != message.from_user.id
+                or int(payment_record.amount) != stars_amount or payment_record.currency != "XTR"):
+            logging.warning("Stars payment does not match the issued invoice %s", payment_db_id)
+            return
+        sale_mode = getattr(payment_record, "product_type", "subscription")
+        months = (payment_record.lte_traffic_bytes / 2**30 if sale_mode == "lte_topup"
+                  else payment_record.subscription_duration_months)
         promo_code_id_from_payment = payment_record.promo_code_id if payment_record else None
         device_limit_from_payment = payment_record.hwid_device_limit if payment_record else None
 
@@ -192,21 +186,21 @@ class StarsService:
             activation_details = await self.subscription_service.activate_subscription(
                 session,
                 message.from_user.id,
-                int(months) if sale_mode != "traffic" else 0,
+                int(months) if sale_mode != "lte_topup" else 0,
                 float(stars_amount),
                 payment_db_id,
                 promo_code_id_from_payment=promo_code_id_from_payment,
                 provider="telegram_stars",
                 sale_mode=sale_mode,
-                traffic_gb=months if sale_mode == "traffic" else None,
-                device_limit=device_limit_from_payment if sale_mode != "traffic" else None,
+                traffic_gb=months if sale_mode == "lte_topup" else None,
+                device_limit=device_limit_from_payment if sale_mode != "lte_topup" else None,
             )
             if not activation_details or not activation_details.get("end_date"):
                 raise RuntimeError(
                     f"Failed to activate subscription after stars payment {payment_db_id}"
                 )
 
-            if sale_mode != "traffic":
+            if sale_mode != "lte_topup":
                 referral_bonus = await self.referral_service.apply_referral_bonuses_for_payment(
                     session,
                     message.from_user.id,
@@ -238,7 +232,7 @@ class StarsService:
         config_link_display, connect_button_url = await prepare_config_links(self.settings, raw_config_link)
         config_link_text = config_link_display or _("config_link_not_available")
 
-        if sale_mode == "traffic":
+        if sale_mode == "lte_topup":
             success_msg = _(
                 "payment_successful_traffic_full",
                 traffic_gb=str(int(months)) if float(months).is_integer() else f"{months:g}",
@@ -302,11 +296,11 @@ class StarsService:
                 user_id=message.from_user.id,
                 amount=float(stars_amount),
                 currency="XTR",
-                months=int(months) if sale_mode != "traffic" else 0,
+                months=int(months) if sale_mode != "lte_topup" else 0,
                 payment_provider="stars",
                 username=user.username if user else None,
-                traffic_gb=months if sale_mode == "traffic" else None,
-                device_limit=device_limit_from_payment if sale_mode != "traffic" else None,
+                traffic_gb=months if sale_mode == "lte_topup" else None,
+                device_limit=device_limit_from_payment if sale_mode != "lte_topup" else None,
             )
         except Exception as e:
             logging.error(f"Failed to send stars payment notification: {e}")

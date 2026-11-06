@@ -80,13 +80,17 @@ def format_payment_text(payment: Payment, i18n: JsonI18n, lang: str, settings: S
         '2328': '2328',
     }.get(payment.provider, payment.provider or 'Unknown')
 
-    traffic_mode = getattr(settings, "traffic_sale_mode", False)
+    product_type = getattr(payment, "product_type", "subscription") or "subscription"
+    traffic_mode = product_type == "lte_topup"
     if traffic_mode:
-        traffic_val = payment.subscription_duration_months or 0
+        traffic_val = (payment.lte_traffic_bytes or 0) / 2**30
         traffic_display = str(int(traffic_val)) if float(traffic_val).is_integer() else f"{traffic_val:g}"
         period_line = _("admin_payment_traffic_label", traffic_gb=traffic_display)
     else:
         period_line = _("admin_payment_months_label", months=payment.subscription_duration_months or 0)
+    period_line += "\n" + _("admin_payment_product",
+                            kind=_("admin_payment_kind_" + product_type),
+                            gb=f"{(getattr(payment, 'lte_traffic_bytes', None) or 0) / 2**30:g}")
     
     return (
         f"{status_emoji} <b>{payment.amount} {payment.currency}</b>\n"
@@ -249,19 +253,18 @@ async def export_payments_csv_handler(callback: types.CallbackQuery, i18n_data: 
             _("admin_csv_description"),
             _("admin_csv_units"),
             _("admin_csv_created_at"),
-            _("admin_csv_provider_payment_id")
+            _("admin_csv_provider_payment_id"),
+            _("admin_csv_product_type"),
+            _("admin_csv_lte_gb"),
         ])
 
-        traffic_mode = getattr(settings, "traffic_sale_mode", False)
         
         # Write payment data
         for payment in all_payments:
+            traffic_mode = getattr(payment, "product_type", "subscription") == "lte_topup"
             units_val = payment.subscription_duration_months or ""
-            if traffic_mode and units_val not in ("", None):
-                try:
-                    units_val = str(int(units_val)) if float(units_val).is_integer() else f"{units_val:g}"
-                except Exception:
-                    units_val = payment.subscription_duration_months or ""
+            if traffic_mode:
+                units_val = f"{(payment.lte_traffic_bytes or 0) / 2**30:g}"
             writer.writerow([
                 payment.payment_id,
                 payment.user_id,
@@ -274,7 +277,9 @@ async def export_payments_csv_handler(callback: types.CallbackQuery, i18n_data: 
                 payment.description or "",
                 units_val,
                 payment.created_at.strftime('%Y-%m-%d %H:%M:%S') if payment.created_at else "",
-                payment.provider_payment_id or ""
+                payment.provider_payment_id or "",
+                getattr(payment, "product_type", "subscription"),
+                f"{payment.lte_traffic_bytes / 2**30:g}" if payment.lte_traffic_bytes is not None else "",
             ])
         
         # Prepare file

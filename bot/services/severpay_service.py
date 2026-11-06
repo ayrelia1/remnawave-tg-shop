@@ -121,13 +121,8 @@ class SeverPayService:
                 promo_code_id = active_discount.promo_code_id
                 denominator = 1 - discount_pct / 100
                 if denominator <= 0:
-                    traffic_mode = bool(getattr(self.settings, "traffic_sale_mode", False))
-                    price_source = (
-                        getattr(self.settings, "traffic_packages", {}) or {}
-                        if traffic_mode
-                        else (self.settings.subscription_options or {})
-                    )
-                    fallback_original = price_source.get(months)
+                    issued = await payment_dal.get_payment_by_db_id(session, payment_db_id)
+                    fallback_original = getattr(issued, "original_amount", None)
                     if fallback_original is not None:
                         original_amount = fallback_original
                         discount_amount = original_amount - amount
@@ -289,7 +284,9 @@ class SeverPayService:
                         return web.json_response({"status": False, "msg": "currency_mismatch"}, status=400)
 
             payment_months = payment.subscription_duration_months or 1
-            sale_mode = "traffic" if self.settings.traffic_sale_mode else "subscription"
+            sale_mode = getattr(payment, "product_type", "subscription")
+            payment_months = (payment.lte_traffic_bytes / 2**30 if sale_mode == "lte_topup"
+                      else (payment.subscription_duration_months or 1))
             if status == "success":
                 try:
                     provider_id = provider_payment_id or str(payment.payment_id)
@@ -308,18 +305,18 @@ class SeverPayService:
                     activation = await self.subscription_service.activate_subscription(
                         session,
                         payment.user_id,
-                        int(payment_months) if sale_mode != "traffic" else 0,
+                        int(payment_months) if sale_mode != "lte_topup" else 0,
                         float(payment.amount),
                         payment.payment_id,
                         promo_code_id_from_payment=payment.promo_code_id,
                         provider="severpay",
                         sale_mode=sale_mode,
-                        traffic_gb=payment_months if sale_mode == "traffic" else None,
-                        device_limit=payment.hwid_device_limit if sale_mode != "traffic" else None,
+                        traffic_gb=payment_months if sale_mode == "lte_topup" else None,
+                        device_limit=payment.hwid_device_limit if sale_mode != "lte_topup" else None,
                     )
 
                     referral_bonus = None
-                    if sale_mode != "traffic":
+                    if sale_mode != "lte_topup":
                         referral_bonus = await self.referral_service.apply_referral_bonuses_for_payment(
                             session,
                             payment.user_id,
@@ -352,7 +349,7 @@ class SeverPayService:
                 days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
                 traffic_label = str(int(payment_months)) if float(payment_months).is_integer() else f"{payment_months:g}"
 
-                if sale_mode == "traffic":
+                if sale_mode == "lte_topup":
                     text = _(
                         "payment_successful_traffic_full",
                         traffic_gb=traffic_label,
@@ -423,11 +420,11 @@ class SeverPayService:
                         user_id=payment.user_id,
                         amount=float(payment.amount),
                         currency=payment.currency,
-                        months=int(payment_months) if sale_mode != "traffic" else 0,
-                        traffic_gb=payment_months if sale_mode == "traffic" else None,
+                        months=int(payment_months) if sale_mode != "lte_topup" else 0,
+                        traffic_gb=payment_months if sale_mode == "lte_topup" else None,
                         payment_provider="severpay",
                         username=db_user.username if db_user else None,
-                        device_limit=payment.hwid_device_limit if sale_mode != "traffic" else None,
+                        device_limit=payment.hwid_device_limit if sale_mode != "lte_topup" else None,
                     )
                 except Exception as exc:
                     logging.error("SeverPay webhook: failed to notify admins: %s", exc)

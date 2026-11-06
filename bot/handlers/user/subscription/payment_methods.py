@@ -392,11 +392,9 @@ async def payment_method_history(callback: types.CallbackQuery, settings: Settin
         await safe_edit_text(callback.message, _("payment_method_no_history"), reply_markup=back_markup)
         return
 
-    traffic_mode = getattr(settings, "traffic_sale_mode", False)
-
     def _format_item(p: Payment) -> str:
-        if traffic_mode:
-            units_val = p.subscription_duration_months or 0
+        if getattr(p, "product_type", "subscription") == "lte_topup":
+            units_val = (p.lte_traffic_bytes or 0) / 2**30
             units_display = str(int(units_val)) if float(units_val).is_integer() else f"{units_val:g}"
             title = p.description or _("traffic_purchase_title", traffic_gb=units_display)
         else:

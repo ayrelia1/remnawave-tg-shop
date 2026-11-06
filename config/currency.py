@@ -8,7 +8,7 @@ and it is `base_amount` that all the totals sum.
 
 This is deliberately a constant rather than a setting. The value is not
 configuration: it is baked into every historical `base_amount` already written,
-into the `RUB_PRICE_*` price list, and into the accounts the payment providers
+into the `DEVICE_PLANS_RUB` price list, and into the accounts the payment providers
 settle to. Changing it is a fork-level decision that also needs a data
 migration to re-express existing rows — an env var would make that look like a
 one-line switch, which is exactly the trap this module exists to close.

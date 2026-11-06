@@ -45,3 +45,5 @@ class AdminStates(StatesGroup):
     # Currency rates
     waiting_for_currency_rate = State()
     waiting_for_new_currency = State()
+    waiting_for_lte_amount = State()
+    confirming_lte_adjustment = State()

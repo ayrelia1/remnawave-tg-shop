@@ -13,7 +13,7 @@ from db.dal import payment_dal
 def payment_flow(monkeypatch):
     row = SimpleNamespace(payment_id=7, user_id=111, provider="2328", status="pending_2328",
                           provider_payment_id=None, description="Original invoice description")
-    callback = SimpleNamespace(data="pay_2328:1:129.0:subscription", from_user=SimpleNamespace(id=111),
+    callback = SimpleNamespace(data="pay_2328:2:1:129.0:subscription", from_user=SimpleNamespace(id=111),
                                message=SimpleNamespace(), answer=AsyncMock())
     service = SimpleNamespace(configured=True, create_invoice=AsyncMock(return_value=(True, {
         "uuid": "invoice-1", "url": "https://2328.io/pay/invoice-1", "payment_status": "check",

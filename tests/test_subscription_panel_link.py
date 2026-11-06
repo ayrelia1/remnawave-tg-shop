@@ -235,6 +235,7 @@ async def test_missing_telegram_id_on_panel_is_pushed_back(settings, dal_spy):
     ref, payload = panel.updates[-1]
     assert ref == NEW_REF
     assert payload["telegramId"] == TG_ID
+    assert "description" not in payload
 
 
 async def test_panel_update_payload_carries_no_uuid(settings):

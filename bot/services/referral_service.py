@@ -63,7 +63,8 @@ class ReferralService:
             if getattr(self.settings, "REFERRAL_ONE_BONUS_PER_REFEREE", True):
                 try:
                     succeeded_count = await payment_dal.count_user_succeeded_payments(
-                        session, referee_user_id, exclude_payment_id=current_payment_db_id
+                        session, referee_user_id, exclude_payment_id=current_payment_db_id,
+                        product_type="subscription",
                     )
                     if succeeded_count and succeeded_count > 0:
                         logging.info(

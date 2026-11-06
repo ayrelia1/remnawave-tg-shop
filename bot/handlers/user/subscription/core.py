@@ -5,13 +5,12 @@ from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from typing import Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from config.settings import Settings
 from bot.keyboards.inline.user_keyboards import (
-    get_subscription_options_keyboard,
     get_device_tier_keyboard,
     get_subscription_period_keyboard,
     get_back_to_main_menu_markup,
@@ -21,6 +20,7 @@ from bot.services.subscription_service import SubscriptionService
 from bot.services.panel_api_service import PanelApiService, PanelUnavailableError
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.message_helpers import edit_or_send_with_photo, safe_edit_text
+from bot.utils.date_utils import as_utc
 from db.dal import subscription_dal, user_billing_dal
 from db.models import Subscription
 
@@ -31,6 +31,7 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_COMPUTER,
     PREMIUM_EMOJI_CONNECT,
     PREMIUM_EMOJI_HAND_STOP,
+    PREMIUM_EMOJI_PACKAGE,
     PREMIUM_EMOJI_REFRESH,
     PREMIUM_EMOJI_SUBSCRIBE,
     PREMIUM_EMOJI_YES,
@@ -227,103 +228,32 @@ async def display_subscription_options(
             await event.answer(err_msg)
         return
 
-    # Device-tier plans: first step is choosing the number of devices.
-    if getattr(settings, "device_plans_active", False):
-        tier_options = settings.device_subscription_options
-        tier_min_prices = {
-            dev: months_map[min(months_map.keys())]
-            for dev, months_map in tier_options.items()
-            if months_map
-        }
-        target_obj = event.message if isinstance(event, types.CallbackQuery) else event
-        if tier_min_prices:
-            text_content = get_text("select_device_tier")
-            reply_markup = get_device_tier_keyboard(tier_min_prices, "RUB", current_lang, i18n)
-        else:
-            text_content = get_text("no_subscription_options_available")
-            reply_markup = get_back_to_main_menu_markup(current_lang, i18n)
-        if target_obj:
-            await edit_or_send_with_photo(
-                message=target_obj,
-                bot=target_obj.bot,
-                caption=text_content,
-                reply_markup=reply_markup,
-                is_edit=isinstance(event, types.CallbackQuery),
-            )
-        if isinstance(event, types.CallbackQuery):
-            try:
-                await event.answer()
-            except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        return
-
-    currency_symbol_val = "RUB"
-    traffic_packages = getattr(settings, "traffic_packages", {}) or {}
-    stars_traffic_packages = getattr(settings, "stars_traffic_packages", {}) or {}
-    traffic_mode = bool(getattr(settings, "traffic_sale_mode", False) or stars_traffic_packages)
-
-    options_are_stars = False
-    if traffic_mode:
-        if traffic_packages:
-            options = traffic_packages
-        elif stars_traffic_packages:
-            options = stars_traffic_packages
-            currency_symbol_val = "⭐"
-            options_are_stars = True
-        else:
-            options = {}
-    else:
-        options = settings.subscription_options
-
-    display_options = options
-    if options and promo_code_service:
-        try:
-            active_discount_info = await promo_code_service.get_user_active_discount(
-                session, event.from_user.id
-            )
-        except Exception:
-            active_discount_info = None
-        if active_discount_info:
-            discount_pct, _promo_code = active_discount_info
-            discounted_options = {}
-            for period, price in options.items():
-                if price is None:
-                    discounted_options[period] = price
-                else:
-                    discounted_price, _ = promo_code_service.calculate_discounted_price(
-                        price, discount_pct
-                    )
-                    if options_are_stars:
-                        discounted_price = math.ceil(discounted_price)
-                    discounted_options[period] = discounted_price
-            display_options = discounted_options
-
-    if display_options:
-        text_content = get_text("select_traffic_package") if traffic_mode else get_text("select_subscription_period")
-        reply_markup = get_subscription_options_keyboard(
-            display_options, currency_symbol_val, current_lang, i18n, traffic_mode=traffic_mode
+    # Subscription selection always starts with a device tier.
+    rub_tiers = settings.device_subscription_options
+    stars_tiers = settings.device_stars_options
+    tier_min_prices = {}
+    tier_currencies = {}
+    for devices in sorted(set(rub_tiers) | set(stars_tiers)):
+        periods = rub_tiers.get(devices) or stars_tiers[devices]
+        tier_min_prices[devices] = periods[min(periods)]
+        tier_currencies[devices] = "RUB" if devices in rub_tiers else "⭐"
+    target_obj = event.message if isinstance(event, types.CallbackQuery) else event
+    if tier_min_prices:
+        text_content = get_text("select_device_tier")
+        reply_markup = get_device_tier_keyboard(
+            tier_min_prices, "RUB", current_lang, i18n, currencies=tier_currencies
         )
     else:
         text_content = get_text("no_subscription_options_available")
         reply_markup = get_back_to_main_menu_markup(current_lang, i18n)
-
-    target_message_obj = event.message if isinstance(event, types.CallbackQuery) else event
-    if not target_message_obj:
-        if isinstance(event, types.CallbackQuery):
-            try:
-                await event.answer(get_text("error_occurred_try_again"), show_alert=True)
-            except Exception as exc:
-                logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        return
-
-    await edit_or_send_with_photo(
-        message=target_message_obj,
-        bot=target_message_obj.bot,
-        caption=text_content,
-        reply_markup=reply_markup,
-        is_edit=isinstance(event, types.CallbackQuery),
-
-    )
+    if target_obj:
+        await edit_or_send_with_photo(
+            message=target_obj,
+            bot=target_obj.bot,
+            caption=text_content,
+            reply_markup=reply_markup,
+            is_edit=isinstance(event, types.CallbackQuery),
+        )
     if isinstance(event, types.CallbackQuery):
         try:
             await event.answer()
@@ -379,7 +309,10 @@ async def select_device_tier_callback(
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         return
 
-    tier_options = settings.device_subscription_options.get(devices)
+    rub_periods = settings.device_subscription_options.get(devices, {})
+    stars_periods = settings.device_stars_options.get(devices, {})
+    tier_options = {**stars_periods, **rub_periods}
+    currencies = {months: "RUB" if months in rub_periods else "⭐" for months in tier_options}
     if not tier_options:
         try:
             await callback.answer(get_text("error_try_again"), show_alert=True)
@@ -388,7 +321,8 @@ async def select_device_tier_callback(
         return
 
     text_content = get_text("select_subscription_period_for_devices", devices=devices)
-    reply_markup = get_subscription_period_keyboard(devices, tier_options, "RUB", current_lang, i18n)
+    reply_markup = get_subscription_period_keyboard(devices, tier_options, "RUB", current_lang, i18n,
+                                                    currencies=currencies)
     await edit_or_send_with_photo(
         message=callback.message,
         bot=callback.message.bot,
@@ -441,7 +375,12 @@ async def my_subscription_command_handler(
                 logging.debug("Suppressed answer exception: %s", e_ans)
         return
 
-    if not active:
+    local_sub = (await subscription_dal.get_active_subscription_by_user_id(session, event.from_user.id)
+                 if active else None)
+    end_date = active.get("end_date") if active else None
+    has_current_subscription = (active is not None and active.get("status_from_panel") == "ACTIVE"
+                                and end_date is not None and as_utc(end_date) > datetime.now(timezone.utc))
+    if not has_current_subscription:
         text = get_text("subscription_not_active")
 
         buy_button = InlineKeyboardButton(
@@ -451,7 +390,13 @@ async def my_subscription_command_handler(
         )
         back_markup = get_back_to_main_menu_markup(current_lang, i18n)
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[buy_button], *back_markup.inline_keyboard])
+        rows = [[buy_button]]
+        if await subscription_dal.has_any_subscription_for_user(session, event.from_user.id):
+            from db.dal import lte_dal
+            balance = await lte_dal.remaining(session, event.from_user.id)
+            if balance is not None:
+                text += "\n\n" + get_text("lte_subscription_balance", gb=f"{balance / 2**30:.2f}")
+        kb = InlineKeyboardMarkup(inline_keyboard=[*rows, *back_markup.inline_keyboard])
 
         if isinstance(event, types.CallbackQuery):
             try:
@@ -478,71 +423,43 @@ async def my_subscription_command_handler(
             )
         return
 
-    end_date = active.get("end_date")
     days_left = (end_date.date() - datetime.now().date()).days if end_date else 0
-    traffic_mode = bool(getattr(settings, "traffic_sale_mode", False))
     config_link_display = active.get("config_link")
     connect_button_url = active.get("connect_button_url")
     config_link_value = config_link_display or get_text("config_link_not_available")
-    def _fmt_gb(val: Optional[float]) -> str:
-        if val is None:
-            return get_text("traffic_na")
-        try:
-            if isinstance(val, (int, float)):
-                val_gb = float(val) / (2**30)
-                return f"{val_gb:.2f} GB"
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        return str(val)
-
-    if traffic_mode:
-        limit_display = _fmt_gb(active.get("traffic_limit_bytes"))
-        used_display = _fmt_gb(active.get("traffic_used_bytes"))
-        remaining_display = get_text("traffic_na")
-        try:
-            limit_val = active.get("traffic_limit_bytes") or 0
-            used_val = active.get("traffic_used_bytes") or 0
-            remaining_val = max(0, float(limit_val) - float(used_val))
-            remaining_display = _fmt_gb(remaining_val)
-        except Exception as exc:
-            logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
-        text = get_text(
-            "my_traffic_details",
-            status=_localize_status(active.get("status_from_panel"), get_text),
-            end_date=end_date.strftime("%d.%m.%Y") if end_date else get_text("traffic_no_expiry"),
-            traffic_limit=limit_display,
-            traffic_used=used_display,
-            traffic_left=remaining_display,
-            config_link=config_link_value,
-        )
+    max_devices_val = active.get("max_devices")
+    if max_devices_val in (None, 0):
+        max_devices_display = get_text("devices_unlimited_label")
     else:
-        max_devices_val = active.get("max_devices")
-        if max_devices_val in (None, 0):
-            max_devices_display = get_text("devices_unlimited_label")
-        else:
-            try:
-                max_devices_display = str(int(max_devices_val))
-            except (TypeError, ValueError):
-                max_devices_display = str(max_devices_val)
-        text = get_text(
-            "my_subscription_details",
-            end_date=end_date.strftime("%d.%m.%Y") if end_date else "N/A",
-            days_left=max(0, days_left),
-            status=_localize_status(active.get("status_from_panel"), get_text),
-            config_link=config_link_value,
-            max_devices=max_devices_display,
-            traffic_limit=(f"{active['traffic_limit_bytes'] / 2**30:.2f} GB" if active.get("traffic_limit_bytes") else get_text("traffic_unlimited")),
-            traffic_used=(
-                f"{active['traffic_used_bytes'] / 2**30:.2f} GB" if active.get("traffic_used_bytes") is not None else get_text("traffic_na")
-            ),
-        )
+        try:
+            max_devices_display = str(int(max_devices_val))
+        except (TypeError, ValueError):
+            max_devices_display = str(max_devices_val)
+    text = get_text(
+        "my_subscription_details",
+        end_date=end_date.strftime("%d.%m.%Y") if end_date else "N/A",
+        days_left=max(0, days_left),
+        status=_localize_status(active.get("status_from_panel"), get_text),
+        config_link=config_link_value,
+        max_devices=max_devices_display,
+        traffic_limit=(f"{active['traffic_limit_bytes'] / 2**30:.2f} GB" if active.get("traffic_limit_bytes") else get_text("traffic_unlimited")),
+        traffic_used=(
+            f"{active['traffic_used_bytes'] / 2**30:.2f} GB" if active.get("traffic_used_bytes") is not None else get_text("traffic_na")
+        ),
+    )
+
+    from db.dal import lte_dal
+    lte_remaining = await lte_dal.remaining(session, event.from_user.id)
+    if lte_remaining is not None:
+        text += "\n\n" + get_text("lte_subscription_balance", gb=f"{lte_remaining / 2**30:.2f}")
 
     base_markup = get_back_to_main_menu_markup(current_lang, i18n)
     kb = base_markup.inline_keyboard
     try:
-        local_sub = await subscription_dal.get_active_subscription_by_user_id(session, event.from_user.id)
         # Build rows to prepend above the base "back" markup
-        prepend_rows = []
+        prepend_rows = [[InlineKeyboardButton(
+            text=get_text("lte_topup_button"), callback_data="lte:packages",
+            icon_custom_emoji_id=PREMIUM_EMOJI_PACKAGE)]]
 
         # 1) Mini-app connect button on top if enabled, otherwise fall back to config link URL
         if settings.SUBSCRIPTION_MINI_APP_URL:
@@ -588,21 +505,21 @@ async def my_subscription_command_handler(
         ])
 
         # Renew / Change tariff (device plans only).
-        if not traffic_mode and getattr(settings, "device_plans_active", False):
+        if getattr(settings, "device_plans_active", False):
             # "Renew" jumps straight to the period selection for the user's
             # current tariff (same tier -> time just stacks, no switch preview).
             # Prefer the recorded paid tariff; for trial/legacy fall back to the
             # panel's current device limit, then to the base tier.
             renew_devices = None
-            if local_sub and local_sub.hwid_device_limit:
+            if local_sub and local_sub.hwid_device_limit is not None:
                 renew_devices = int(local_sub.hwid_device_limit)
             else:
                 panel_devices = active.get("max_devices")
-                if panel_devices and int(panel_devices) in settings.device_tiers:
+                if panel_devices is not None and int(panel_devices) in settings.device_tiers:
                     renew_devices = int(panel_devices)
                 else:
                     renew_devices = settings.base_device_limit
-            if renew_devices and int(renew_devices) in settings.device_tiers:
+            if renew_devices is not None and int(renew_devices) in settings.device_tiers:
                 prepend_rows.append([
                     InlineKeyboardButton(
                         text=get_text("renew_subscription_button"),
@@ -619,7 +536,7 @@ async def my_subscription_command_handler(
             ])
 
         # 2) Auto-renew toggle (YooKassa only)
-        if not traffic_mode and local_sub and local_sub.provider == "yookassa" and settings.yookassa_autopayments_active:
+        if local_sub and local_sub.provider == "yookassa" and settings.yookassa_autopayments_active:
             toggle_text = (
                 get_text("autorenew_disable_button") if local_sub.auto_renew_enabled else get_text("autorenew_enable_button")
             )
@@ -641,7 +558,7 @@ async def my_subscription_command_handler(
         ])
 
         # 4) Payment methods management (when autopayments enabled)
-        if not traffic_mode and settings.yookassa_autopayments_active:
+        if settings.yookassa_autopayments_active:
             prepend_rows.append([
                 InlineKeyboardButton(
                     text=get_text("payment_methods_manage_button"),

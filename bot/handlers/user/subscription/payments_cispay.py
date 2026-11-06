@@ -135,7 +135,7 @@ async def pay_cispay_callback_handler(
     )
     payment_description = (
         get_text("payment_description_traffic", traffic_gb=human_value)
-        if sale_mode == "traffic"
+        if sale_mode == "lte_topup"
         else get_text("payment_description_subscription", months=int(months))
     )
 
@@ -148,14 +148,16 @@ async def pay_cispay_callback_handler(
         "status": "pending_cispay",
         "description": payment_description,
         "subscription_duration_months": int(months),
+        "product_type": sale_mode,
+        "purchase_value": months,
         "provider": "cispay",
         "promo_code_id": None,
-        "hwid_device_limit": devices if sale_mode != "traffic" else None,
+        "hwid_device_limit": devices if sale_mode != "lte_topup" else None,
     }
 
     try:
         payment_record = await payment_dal.create_payment_record(
-            session, payment_record_payload
+            session, payment_record_payload, settings=settings
         )
         await session.commit()
     except Exception as exc:
@@ -211,14 +213,14 @@ async def pay_cispay_callback_handler(
 
             message_key = (
                 "payment_link_message_traffic"
-                if sale_mode == "traffic"
+                if sale_mode == "lte_topup"
                 else "payment_link_message"
             )
             keyboard = get_payment_url_keyboard(
                 payment_url,
                 current_lang,
                 i18n,
-                back_callback=offer_back_callback(devices, months),
+                back_callback=offer_back_callback(devices, months, sale_mode),
                 back_text_key="back_to_payment_methods_button",
             )
             try:

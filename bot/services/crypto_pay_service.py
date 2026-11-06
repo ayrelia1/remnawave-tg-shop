@@ -69,6 +69,7 @@ class CryptoPayService:
         promo_code_service=None,
         device_limit: Optional[int] = None,
     ) -> Optional[str]:
+        settings = self.settings
         if not self.configured or not self.client:
             logging.error("CryptoPayService not configured")
             return None
@@ -87,12 +88,8 @@ class CryptoPayService:
                 promo_code_id = active_discount.promo_code_id
                 denominator = 1 - discount_pct / 100
                 if denominator <= 0:
-                    price_source = (
-                        getattr(self.settings, "traffic_packages", {}) or {}
-                        if sale_mode == "traffic"
-                        else (self.settings.subscription_options or {})
-                    )
-                    fallback_original = price_source.get(months)
+                    fallback_original = (settings.traffic_packages.get(months) if sale_mode == "lte_topup"
+                                         else settings.get_plan_price(device_limit, int(months)))
                     if fallback_original is not None:
                         original_amount = fallback_original
                         discount_amount = original_amount - amount
@@ -123,14 +120,17 @@ class CryptoPayService:
                     "amount": amount,
                     "original_amount": original_amount,
                     "discount_applied": discount_amount,
-                    "currency": self.settings.CRYPTOPAY_ASSET,
+                    "currency": settings.CRYPTOPAY_ASSET,
                     "status": "pending_cryptopay",
                     "description": description,
                     "subscription_duration_months": int(months),
+                    "product_type": sale_mode,
+                    "purchase_value": months,
                     "provider": "cryptopay",
                     "promo_code_id": promo_code_id,
-                    "hwid_device_limit": device_limit if sale_mode != "traffic" else None,
+                    "hwid_device_limit": device_limit if sale_mode != "lte_topup" else None,
                 },
+                settings=self.settings,
             )
             await session.commit()
         except Exception as e_db_create:
@@ -145,15 +145,15 @@ class CryptoPayService:
             "subscription_months": str(months),
             "payment_db_id": str(payment_record.payment_id),
             "sale_mode": sale_mode,
-            "traffic_gb": str(months) if sale_mode == "traffic" else None,
-            "device_limit": str(device_limit) if (device_limit and sale_mode != "traffic") else None,
+            "traffic_gb": str(months) if sale_mode == "lte_topup" else None,
+            "device_limit": str(device_limit) if (device_limit and sale_mode != "lte_topup") else None,
         })
         try:
             invoice = await self.client.create_invoice(
                 amount=amount,
-                currency_type=self.settings.CRYPTOPAY_CURRENCY_TYPE,
-                fiat=self.settings.CRYPTOPAY_ASSET if self.settings.CRYPTOPAY_CURRENCY_TYPE == "fiat" else None,
-                asset=self.settings.CRYPTOPAY_ASSET if self.settings.CRYPTOPAY_CURRENCY_TYPE == "crypto" else None,
+                currency_type=settings.CRYPTOPAY_CURRENCY_TYPE,
+                fiat=settings.CRYPTOPAY_ASSET if settings.CRYPTOPAY_CURRENCY_TYPE == "fiat" else None,
+                asset=settings.CRYPTOPAY_ASSET if settings.CRYPTOPAY_CURRENCY_TYPE == "crypto" else None,
                 description=description,
                 payload=payload,
             )
@@ -187,7 +187,7 @@ class CryptoPayService:
             user_id = int(meta["user_id"])
             months = float(meta.get("subscription_months") or 0)
             payment_db_id = int(meta["payment_db_id"])
-            sale_mode = meta.get("sale_mode") or ("traffic" if self.settings.traffic_sale_mode else "subscription")
+            sale_mode = meta.get("sale_mode") or "subscription"
             traffic_gb = float(meta.get("traffic_gb")) if meta.get("traffic_gb") else months
             device_limit = int(float(meta["device_limit"])) if meta.get("device_limit") else None
         except Exception as e:
@@ -208,6 +208,12 @@ class CryptoPayService:
                 if not payment_record:
                     logging.error(f"CryptoPay: Payment record {payment_db_id} not found")
                     return
+
+                sale_mode = getattr(payment_record, "product_type", "subscription")
+                months = (payment_record.lte_traffic_bytes / 2**30 if sale_mode == "lte_topup"
+                          else payment_record.subscription_duration_months)
+                traffic_gb = months
+                device_limit = payment_record.hwid_device_limit
 
                 if payment_record.user_id != user_id:
                     logging.error(
@@ -276,14 +282,14 @@ class CryptoPayService:
                 activation = await subscription_service.activate_subscription(
                     session,
                     user_id,
-                    int(months) if sale_mode != "traffic" else 0,
+                    int(months) if sale_mode != "lte_topup" else 0,
                     float(invoice.amount),
                     payment_db_id,
                     promo_code_id_from_payment=payment_record.promo_code_id,
                     provider="cryptopay",
                     sale_mode=sale_mode,
-                    traffic_gb=traffic_gb if sale_mode == "traffic" else None,
-                    device_limit=device_limit if sale_mode != "traffic" else None,
+                    traffic_gb=traffic_gb if sale_mode == "lte_topup" else None,
+                    device_limit=device_limit if sale_mode != "lte_topup" else None,
                 )
                 if not activation or not activation.get("end_date"):
                     raise RuntimeError(
@@ -291,7 +297,7 @@ class CryptoPayService:
                     )
 
                 referral_bonus = None
-                if sale_mode != "traffic":
+                if sale_mode != "lte_topup":
                     referral_bonus = await referral_service.apply_referral_bonuses_for_payment(
                         session,
                         user_id,
@@ -320,7 +326,7 @@ class CryptoPayService:
                 applied_days = referral_bonus.get("referee_bonus_applied_days", 0)
             days_total = max(0, (final_end - datetime.now(timezone.utc)).days) if final_end else 0
 
-            if sale_mode == "traffic":
+            if sale_mode == "lte_topup":
                 text = _("payment_successful_traffic_full",
                          traffic_gb=str(int(traffic_gb)) if float(traffic_gb).is_integer() else f"{traffic_gb:g}",
                          end_date=final_end.strftime('%d.%m.%Y') if final_end else "—",
@@ -377,11 +383,11 @@ class CryptoPayService:
                     user_id=user_id,
                     amount=float(invoice.amount),
                     currency=invoice.asset or "RUB",
-                    months=int(months) if sale_mode != "traffic" else 0,
-                    traffic_gb=traffic_gb if sale_mode == "traffic" else None,
+                    months=int(months) if sale_mode != "lte_topup" else 0,
+                    traffic_gb=traffic_gb if sale_mode == "lte_topup" else None,
                     payment_provider="crypto_pay",
                     username=user.username if user else None,
-                    device_limit=device_limit if sale_mode != "traffic" else None,
+                    device_limit=device_limit if sale_mode != "lte_topup" else None,
                 )
             except Exception as e:
                 logging.error(f"Failed to send crypto_pay payment notification: {e}")

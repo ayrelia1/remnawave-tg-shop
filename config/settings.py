@@ -2,6 +2,7 @@ import logging
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, HttpUrl, ValidationError, computed_field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
+from .traffic import GIB, traffic_bytes
 
 # Canonical month durations for device-based subscription tiers.
 # The comma-separated price lists in DEVICE_PLANS_* map positionally to these.
@@ -216,31 +217,32 @@ class Settings(BaseSettings):
         description="Comma-separated list of payment methods to show (e.g., platega,cispay,yookassa,stars,2328,cryptopay)",
     )
 
-    MONTH_1_ENABLED: bool = Field(default=True, alias="1_MONTH_ENABLED")
-    MONTH_3_ENABLED: bool = Field(default=True, alias="3_MONTHS_ENABLED")
-    MONTH_6_ENABLED: bool = Field(default=True, alias="6_MONTHS_ENABLED")
-    MONTH_12_ENABLED: bool = Field(default=True, alias="12_MONTHS_ENABLED")
-
-    RUB_PRICE_1_MONTH: Optional[int] = Field(default=None)
-    RUB_PRICE_3_MONTHS: Optional[int] = Field(default=None)
-    RUB_PRICE_6_MONTHS: Optional[int] = Field(default=None)
-    RUB_PRICE_12_MONTHS: Optional[int] = Field(default=None)
-
-    STARS_PRICE_1_MONTH: Optional[int] = Field(default=None)
-    STARS_PRICE_3_MONTHS: Optional[int] = Field(default=None)
-    STARS_PRICE_6_MONTHS: Optional[int] = Field(default=None)
-    STARS_PRICE_12_MONTHS: Optional[int] = Field(default=None)
-
-    # Device-based subscription tiers (e.g. 5/10/15 devices), each with its own
-    # price matrix per duration. When enabled, the bot sells these tiers instead
-    # of the single legacy time-based plan. Format of DEVICE_PLANS_RUB / _STARS:
+    # Device-based subscription tiers, with prices for each duration:
     #   "<devices>:<1m>,<3m>,<6m>,<12m>|<devices>:..."
-    # Prices map positionally to DEVICE_PLAN_MONTHS ([1,3,6,12]); a value of 0 or
-    # empty disables that duration for the tier. Durations are additionally
-    # filtered by the global MONTH_*_ENABLED toggles.
-    DEVICE_PLANS_ENABLED: bool = Field(default=False)
+    # Zero or empty prices disable a duration for that tier and currency.
     DEVICE_PLANS_RUB: Optional[str] = Field(default=None)
     DEVICE_PLANS_STARS: Optional[str] = Field(default=None)
+    DEVICE_PLANS_LTE_GB: str = Field(
+        default="50,150,300,600",
+        description="Whole LTE GB granted for 1/3/6/12 months, independent of device count",
+    )
+
+    @field_validator("DEVICE_PLANS_LTE_GB")
+    @classmethod
+    def validate_device_plan_lte(cls, value: str) -> str:
+        parts = value.split(",")
+        if len(parts) != len(DEVICE_PLAN_MONTHS):
+            raise ValueError("DEVICE_PLANS_LTE_GB requires four GB amounts for 1/3/6/12 months")
+        for part in parts:
+            traffic_bytes(part.strip(), allow_zero=True)
+        return value
+
+    @computed_field
+    @property
+    def device_plan_lte_bytes(self) -> Dict[int, int]:
+        return {months: traffic_bytes(gb.strip(), allow_zero=True)
+                for months, gb in zip(DEVICE_PLAN_MONTHS, self.DEVICE_PLANS_LTE_GB.split(","))}
+
     # Allow/forbid switching to a more expensive / cheaper tier while a
     # subscription is active. Mirrors how Remnawave shop bots gate tariff changes.
     TARIFF_SWITCH_UPGRADE_ENABLED: bool = Field(default=True)
@@ -256,6 +258,14 @@ class Settings(BaseSettings):
         default=None,
         description="Comma-separated list of traffic packages priced in Stars, e.g. '5:500,20:1500'",
     )
+
+    @field_validator("TRAFFIC_PACKAGES", "STARS_TRAFFIC_PACKAGES")
+    @classmethod
+    def validate_package_gb(cls, value: Optional[str]) -> Optional[str]:
+        for entry in (value or "").split(","):
+            if ":" in entry:
+                traffic_bytes(entry.split(":", 1)[0].strip())
+        return value
 
     SUBSCRIPTION_NOTIFICATIONS_ENABLED: bool = Field(default=True)
     SUBSCRIPTION_NOTIFY_ON_EXPIRE: bool = Field(default=True)
@@ -311,6 +321,21 @@ class Settings(BaseSettings):
     )
     USER_TRAFFIC_LIMIT_GB: Optional[float] = Field(default=0.0)
     USER_TRAFFIC_STRATEGY: str = Field(default="NO_RESET")
+    LTE_ENFORCEMENT_ENABLED: bool = Field(default=False)
+    LTE_SQUAD_UUIDS: Optional[str] = Field(default=None)
+    LTE_CHECK_INTERVAL_SECONDS: int = Field(default=60, ge=10, le=3600)
+
+    @field_validator("LTE_CHECK_INTERVAL_SECONDS")
+    @classmethod
+    def minimum_lte_check_interval(cls, value: int) -> int:
+        # Preserve compatibility with previous .env files containing 30.
+        return max(60, value)
+
+    @model_validator(mode="after")
+    def validate_lte_configuration(self):
+        if self.LTE_ENFORCEMENT_ENABLED and not self.parsed_lte_squad_uuids:
+            raise ValueError("LTE_SQUAD_UUIDS is required when LTE enforcement is enabled")
+        return self
     USER_SQUAD_UUIDS: Optional[str] = Field(
         default=None,
         description=
@@ -322,7 +347,12 @@ class Settings(BaseSettings):
 
     TRIAL_ENABLED: bool = Field(default=True)
     TRIAL_DURATION_DAYS: int = Field(default=3)
-    TRIAL_TRAFFIC_LIMIT_GB: Optional[float] = Field(default=5.0)
+    TRIAL_TRAFFIC_LIMIT_GB: Optional[int] = Field(default=10)
+
+    @field_validator("TRIAL_TRAFFIC_LIMIT_GB", mode="before")
+    @classmethod
+    def validate_trial_gb(cls, value):
+        return traffic_bytes(value, allow_zero=True) // GIB if value is not None else None
 
     NAME_BONUS_ENABLED: bool = Field(
         default=False,
@@ -397,14 +427,20 @@ class Settings(BaseSettings):
     def trial_traffic_limit_bytes(self) -> int:
         if self.TRIAL_TRAFFIC_LIMIT_GB is None or self.TRIAL_TRAFFIC_LIMIT_GB <= 0:
             return 0
-        return int(self.TRIAL_TRAFFIC_LIMIT_GB * (1024**3))
+        return self.TRIAL_TRAFFIC_LIMIT_GB * GIB
 
     @computed_field
     @property
     def user_traffic_limit_bytes(self) -> int:
-        if self.USER_TRAFFIC_LIMIT_GB is None or self.USER_TRAFFIC_LIMIT_GB <= 0:
-            return 0
-        return int(self.USER_TRAFFIC_LIMIT_GB * (1024**3))
+        # Per-account limits would also disconnect the unlimited foreign nodes.
+        return 0
+
+    @property
+    def parsed_lte_squad_uuids(self) -> List[str]:
+        from uuid import UUID
+        return list(dict.fromkeys(str(UUID(value.strip()))
+                                 for value in (self.LTE_SQUAD_UUIDS or "").split(",")
+                                 if value.strip()))
 
     @computed_field
     @property
@@ -563,43 +599,6 @@ class Settings(BaseSettings):
             return self.YOOKASSA_PAYMENT_SUBJECT
         return "service" if self.YOOKASSA_AUTOPAYMENTS_ENABLED else "payment"
 
-    @computed_field
-    @property
-    def subscription_options(self) -> Dict[int, float]:
-        options: Dict[int, float] = {}
-
-        if self.MONTH_1_ENABLED and self.RUB_PRICE_1_MONTH is not None:
-            options[1] = float(self.RUB_PRICE_1_MONTH)
-        if self.MONTH_3_ENABLED and self.RUB_PRICE_3_MONTHS is not None:
-            options[3] = float(self.RUB_PRICE_3_MONTHS)
-        if self.MONTH_6_ENABLED and self.RUB_PRICE_6_MONTHS is not None:
-            options[6] = float(self.RUB_PRICE_6_MONTHS)
-        if self.MONTH_12_ENABLED and self.RUB_PRICE_12_MONTHS is not None:
-            options[12] = float(self.RUB_PRICE_12_MONTHS)
-        return options
-
-    @computed_field
-    @property
-    def stars_subscription_options(self) -> Dict[int, int]:
-        options: Dict[int, int] = {}
-        if self.STARS_ENABLED and self.MONTH_1_ENABLED and self.STARS_PRICE_1_MONTH is not None:
-            options[1] = self.STARS_PRICE_1_MONTH
-        if self.STARS_ENABLED and self.MONTH_3_ENABLED and self.STARS_PRICE_3_MONTHS is not None:
-            options[3] = self.STARS_PRICE_3_MONTHS
-        if self.STARS_ENABLED and self.MONTH_6_ENABLED and self.STARS_PRICE_6_MONTHS is not None:
-            options[6] = self.STARS_PRICE_6_MONTHS
-        if self.STARS_ENABLED and self.MONTH_12_ENABLED and self.STARS_PRICE_12_MONTHS is not None:
-            options[12] = self.STARS_PRICE_12_MONTHS
-        return options
-
-    def _month_enabled(self, months: int) -> bool:
-        return {
-            1: self.MONTH_1_ENABLED,
-            3: self.MONTH_3_ENABLED,
-            6: self.MONTH_6_ENABLED,
-            12: self.MONTH_12_ENABLED,
-        }.get(months, True)
-
     @staticmethod
     def _parse_device_plans(raw: Optional[str], as_int: bool) -> Dict[int, Dict[int, float]]:
         """Parse "<devices>:<1m>,<3m>,<6m>,<12m>|..." into {devices: {months: price}}."""
@@ -641,42 +640,29 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def device_plans_active(self) -> bool:
-        """True when device-tier subscriptions are enabled and configured."""
-        if not self.DEVICE_PLANS_ENABLED:
-            return False
-        if self.traffic_sale_mode:
-            return False
-        return bool(self._parse_device_plans(self.DEVICE_PLANS_RUB, as_int=False))
+        """Whether at least one subscription offer is available."""
+        return bool(self.device_subscription_options or self.device_stars_options)
 
     @computed_field
     @property
     def device_subscription_options(self) -> Dict[int, Dict[int, float]]:
-        """{devices: {months: rub_price}}, filtered by MONTH_*_ENABLED."""
-        result: Dict[int, Dict[int, float]] = {}
-        for devices, tier_map in self._parse_device_plans(self.DEVICE_PLANS_RUB, as_int=False).items():
-            filtered = {m: p for m, p in tier_map.items() if self._month_enabled(m)}
-            if filtered:
-                result[devices] = filtered
-        return result
+        """{devices: {months: rub_price}} for configured positive prices."""
+        return self._parse_device_plans(self.DEVICE_PLANS_RUB, as_int=False)
 
     @computed_field
     @property
     def device_stars_options(self) -> Dict[int, Dict[int, int]]:
-        """{devices: {months: stars_price}}, filtered by MONTH_*_ENABLED and STARS_ENABLED."""
+        """{devices: {months: stars_price}}, available only with Stars enabled."""
         if not self.STARS_ENABLED:
             return {}
-        result: Dict[int, Dict[int, int]] = {}
-        for devices, tier_map in self._parse_device_plans(self.DEVICE_PLANS_STARS, as_int=True).items():
-            filtered = {m: int(p) for m, p in tier_map.items() if self._month_enabled(m)}
-            if filtered:
-                result[devices] = filtered
-        return result
+        return {devices: {months: int(price) for months, price in prices.items()}
+                for devices, prices in self._parse_device_plans(self.DEVICE_PLANS_STARS, as_int=True).items()}
 
     @computed_field
     @property
     def device_tiers(self) -> List[int]:
         """Sorted list of available device counts (e.g. [5, 10, 15])."""
-        return sorted(self.device_subscription_options.keys())
+        return sorted(set(self.device_subscription_options) | set(self.device_stars_options))
 
     @computed_field
     @property
@@ -708,11 +694,11 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def traffic_packages(self) -> Dict[float, float]:
+    def traffic_packages(self) -> Dict[int, float]:
         """
         Mapping of traffic size in GB to price in the default currency.
         """
-        packages: Dict[float, float] = {}
+        packages: Dict[int, float] = {}
         raw = (self.TRAFFIC_PACKAGES or "").strip()
         if not raw:
             return packages
@@ -722,7 +708,7 @@ class Settings(BaseSettings):
                 continue
             size_str, price_str = chunk.split(":", 1)
             try:
-                size_gb = float(size_str.strip())
+                size_gb = traffic_bytes(size_str.strip()) // GIB
                 price_val = float(price_str.strip())
                 if size_gb > 0 and price_val >= 0:
                     packages[size_gb] = price_val
@@ -733,11 +719,11 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def stars_traffic_packages(self) -> Dict[float, int]:
+    def stars_traffic_packages(self) -> Dict[int, int]:
         """
         Mapping of traffic size in GB to price in Telegram Stars.
         """
-        packages: Dict[float, int] = {}
+        packages: Dict[int, int] = {}
         raw = (self.STARS_TRAFFIC_PACKAGES or "").strip()
         if not raw:
             return packages
@@ -747,7 +733,7 @@ class Settings(BaseSettings):
                 continue
             size_str, price_str = chunk.split(":", 1)
             try:
-                size_gb = float(size_str.strip())
+                size_gb = traffic_bytes(size_str.strip()) // GIB
                 price_val = int(float(price_str.strip()))
                 if size_gb > 0 and price_val >= 0:
                     packages[size_gb] = price_val
@@ -756,11 +742,6 @@ class Settings(BaseSettings):
                 continue
         return packages
 
-    @computed_field
-    @property
-    def traffic_sale_mode(self) -> bool:
-        """When true, the bot sells traffic packages instead of time-based subscriptions."""
-        return bool(self.traffic_packages or self.stars_traffic_packages)
 
     @computed_field
     @property
@@ -1032,6 +1013,7 @@ class Settings(BaseSettings):
     AUTO_SYNC_INTERVAL_HOURS: int = Field(default=6, description="How often (hours) to run automatic panel sync")
 
     model_config = SettingsConfigDict(env_file='.env',
+                                      hide_input_in_errors=True,
                                       env_file_encoding='utf-8',
                                       extra='ignore',
                                       populate_by_name=True)
@@ -1084,10 +1066,6 @@ def get_settings() -> Settings:
                 if not _settings_instance.FREEKASSA_SECOND_SECRET:
                     logging.warning(
                         "WARNING: FreeKassa second secret is not set. Incoming payment notifications cannot be verified."
-                    )
-                if not _settings_instance.subscription_options:
-                    logging.warning(
-                        "CRITICAL: FreeKassa is enabled but no subscription prices are configured (RUB_PRICE_*). Users will not see payment buttons."
                     )
 
             if _settings_instance.PLATEGA_ENABLED:
