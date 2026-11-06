@@ -30,6 +30,9 @@ class FakePanel:
     async def get_user_by_ref(self, ref):
         return deepcopy(self.user)
 
+    async def get_all_panel_users(self):
+        return [deepcopy(self.user)]
+
     async def update_user_details_on_panel(self, ref, payload):
         self.updates.append(deepcopy(payload))
         if self.reject_patch:

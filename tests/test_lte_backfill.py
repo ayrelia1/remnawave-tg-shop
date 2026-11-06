@@ -16,8 +16,8 @@ from db.models import Base, LteAccount, LteGrant, Payment, Subscription, User
 
 
 @pytest.fixture
-async def legacy():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+async def legacy(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'legacy.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
@@ -28,10 +28,11 @@ async def legacy():
                                  end_date=now + timedelta(days=45), is_active=True))
         session.add(LteAccount(user_id=1, managed=False))
         await session.commit()
-    panel_user = dict(userTraffic={"lifetimeUsedTrafficBytes": 800 * GIB},
+    panel_user = dict(id=42, userTraffic={"lifetimeUsedTrafficBytes": 800 * GIB},
                       expireAt=(now + timedelta(days=45)).isoformat(), status="ACTIVE",
                       activeInternalSquads=["foreign", "lte"])
-    panel = SimpleNamespace(get_user_by_ref=AsyncMock(return_value=panel_user))
+    panel = SimpleNamespace(get_user_by_ref=AsyncMock(return_value=panel_user),
+                            get_all_panel_users=AsyncMock(return_value=[panel_user]))
     yield SimpleNamespace(factory=factory, panel=panel, now=now)
     await engine.dispose()
 
@@ -198,10 +199,42 @@ async def test_users_without_a_subscription_are_also_managed_with_zero_credit(le
 
 
 async def test_panel_outage_leaves_user_untouched_and_stops_the_batch(legacy):
-    legacy.panel.get_user_by_ref.side_effect = PanelUnavailableError("unavailable")
+    legacy.panel.get_all_panel_users.side_effect = PanelUnavailableError("unavailable")
     rows = []
     counts = await backfill_users(legacy.factory, legacy.panel, apply=True, emit=rows.append)
     assert counts["error"] == 1
     async with legacy.factory() as session:
         assert not (await session.get(LteAccount, 1)).managed
         assert not list((await session.execute(select(LteGrant))).scalars())
+
+
+@pytest.mark.parametrize("apply", [False, True])
+async def test_batch_uses_one_bulk_snapshot_without_individual_panel_reads(legacy, apply):
+    async with legacy.factory() as session:
+        session.add_all([User(user_id=i, panel_user_uuid=str(i + 100)) for i in range(2, 15)])
+        await session.commit()
+    sample = legacy.panel.get_user_by_ref.return_value
+    legacy.panel.get_all_panel_users.return_value += [dict(sample, id=i + 100) for i in range(2, 15)]
+    rows = []
+    counts = await backfill_users(legacy.factory, legacy.panel, apply=apply, emit=rows.append)
+    assert counts["applied" if apply else "preview"] == 14
+    assert sorted(row.user_id for row in rows) == list(range(1, 15))
+    legacy.panel.get_all_panel_users.assert_awaited_once()
+    legacy.panel.get_user_by_ref.assert_not_awaited()
+    async with legacy.factory() as session:
+        grants = list((await session.execute(select(LteGrant))).scalars())
+        assert len(grants) == (14 if apply else 0)
+    if apply:
+        rows.clear()
+        counts = await backfill_users(legacy.factory, legacy.panel, apply=True, emit=rows.append)
+        assert counts["already_managed"] == 14
+
+
+async def test_missing_user_in_bulk_snapshot_is_an_error_without_a_fresh_lookup(legacy):
+    legacy.panel.get_all_panel_users.return_value = []
+    rows = []
+    counts = await backfill_users(legacy.factory, legacy.panel, apply=True, emit=rows.append)
+    assert counts["error"] == 1
+    legacy.panel.get_user_by_ref.assert_not_awaited()
+    async with legacy.factory() as session:
+        assert not (await session.get(LteAccount, 1)).managed

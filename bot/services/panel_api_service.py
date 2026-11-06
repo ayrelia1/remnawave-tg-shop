@@ -40,6 +40,17 @@ def extract_panel_user_ref(panel_user: Optional[Dict[str, Any]]) -> Optional[str
     return str(legacy_uuid) if legacy_uuid else None
 
 
+def index_panel_users(users: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Reject ambiguous snapshots instead of applying somebody else's counter."""
+    indexed = {}
+    for user in users:
+        ref = extract_panel_user_ref(user)
+        if ref is None or ref in indexed:
+            raise ValueError("Missing or duplicate panel user reference")
+        indexed[ref] = user
+    return indexed
+
+
 def panel_user_id(user_ref: Optional[str]) -> Optional[int]:
     """Coerce a stored panel reference to the numeric id the 3.x API expects.
 
@@ -340,7 +351,7 @@ class PanelApiService:
     async def _stream_users(
             self,
             log_responses: bool = False,
-            page_size: int = 500,
+            page_size: int = 1000,
             **filters: Any) -> Optional[List[Dict[str, Any]]]:
         """Cursor-paginated GET /api/users/stream.
 
@@ -349,8 +360,13 @@ class PanelApiService:
         `externalSquadUuid` are first-class indexed query filters here, unlike
         the LIKE-based filters of GET /api/users.
         """
+        # Remnawave 3.x caps stream pages at 1000 users.
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size < 1:
+            raise ValueError("Invalid panel page size")
+        page_size = min(page_size, 1000)
         all_users: List[Dict[str, Any]] = []
         cursor: Optional[str] = None
+        seen_cursors: set[str] = set()
         while True:
             params: Dict[str, Any] = {"size": page_size}
             params.update({k: v for k, v in filters.items() if v is not None})
@@ -365,26 +381,37 @@ class PanelApiService:
             self._raise_if_transient(response_data, "stream_users")
 
             if not response_data or response_data.get("error"):
-                if self._error_code(response_data) == "A062":
-                    return all_users
+                if self._error_code(response_data) == "A062" and cursor is None:
+                    return []
                 logging.error(
-                    f"Failed to fetch panel users batch (cursor: {cursor}). Response: {response_data}"
+                    "Failed to fetch panel users batch; discarding incomplete snapshot"
                 )
                 return None
 
-            payload = response_data.get("response") or {}
-            users_batch = payload.get("users") or []
+            payload = response_data.get("response")
+            if (not isinstance(payload, dict) or not isinstance(payload.get("users"), list)
+                    or not isinstance(payload.get("hasMore"), bool)):
+                logging.error("Invalid panel users page; discarding incomplete snapshot")
+                return None
+            users_batch = payload["users"]
+            if any(not isinstance(user, dict) for user in users_batch):
+                logging.error("Invalid panel user in stream; discarding snapshot")
+                return None
             all_users.extend(users_batch)
 
-            cursor = payload.get("nextCursor")
-            if not payload.get("hasMore") or not cursor:
+            if not payload["hasMore"]:
                 break
-            await asyncio.sleep(0.1)
+            next_cursor = payload.get("nextCursor")
+            if next_cursor is None or str(next_cursor) == "" or str(next_cursor) in seen_cursors:
+                logging.error("Invalid panel stream cursor; discarding incomplete snapshot")
+                return None
+            cursor = str(next_cursor)
+            seen_cursors.add(cursor)
         return all_users
 
     async def get_all_panel_users(
             self,
-            page_size: int = 500,
+            page_size: int = 1000,
             log_responses: bool = False) -> Optional[List[Dict[str, Any]]]:
         all_users = await self._stream_users(
             log_responses=log_responses, page_size=page_size)

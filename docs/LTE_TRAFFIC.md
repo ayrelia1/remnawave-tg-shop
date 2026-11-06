@@ -75,6 +75,33 @@ the controller, the operator must:
    `LTE_CHECK_INTERVAL_SECONDS` defaults to 60. Previous values below 60 seconds
    are normalized to 60; 120 seconds is also supported.
 
+Each polling cycle reads `/users/stream` with the maximum supported page size
+of 1000: a panel with 10,000 users needs approximately 10 read requests, rather
+than 10,000 individual lookups. The snapshot exists only for that cycle. An
+incomplete or malformed stream is discarded without changing balances/access.
+Database transactions are opened only for changed accounts; unchanged counters,
+membership, descriptions and notification flags require no per-user writes.
+Up to five changed accounts are processed concurrently, within the existing DB
+pool. Panel PATCH requests contain only changed fields. Concurrent purchases,
+admin adjustments, panel relinking and subscription extensions are checked
+under the existing user/account locks; affected users are deferred until the
+next bulk cycle instead of applying an older snapshot as a counter reset. Notifications
+are checked only for pending rows that were successfully verified this cycle.
+Failed updates/deliveries are retried on the next cycle.
+Only an actual LTE squad-membership change performs an additional individual
+panel GET under the user/account locks, then recalculates usage, eligibility
+and memberships using that fresh response. This preserves recent panel-admin
+changes to unrelated squads and avoids restoring LTE to a recently disabled
+or expired account. A read failure rolls back that user's changes for retry.
+Ordinary accounting, unchanged users and description-only updates do not need
+individual GETs. Panel read/modify/write is not atomic; a simultaneous manual
+edit between the fresh GET and PATCH can still conflict. Interactive purchases
+and admin balance operations retain their existing fresh individual reads.
+
+Cycle completion is logged with user/change/pending-notice counts and duration.
+The interval schedules a cycle; it is not a guarantee that a large cycle finishes
+within that time. Existing scheduler overlap/coalescing rules still apply.
+
 Global panel account limits remain `trafficLimitBytes=0`, with `NO_RESET`.
 The panel collects traffic; the bot compares its cumulative lifetime counter
 with user credit. The initial observation is a baseline, excluding earlier
@@ -178,6 +205,14 @@ creates a unique `legacy_lte_v1:<user_id>` ledger entry. Existing report files
 are never overwritten. The report includes exact allowance bytes and panel
 baselines, with `preview`, `applied`, `already_managed`, `needs_review` or
 `error` outcomes. A nonzero exit code means errors/review items remain.
+
+The command reads the panel once using cursor pages of 1000 users and reuses
+that snapshot for all baselines. No individual panel lookups or panel writes
+are made. Bot user IDs are also read in batches of 1000, with at most five
+independent user transactions running at once. Each completed transaction is
+reported immediately; CSV rows may be out of user-ID order. If the stream
+cannot be read completely, no transfer is applied. Purchases/subscription edits
+and LTE metering must remain paused throughout the transfer, as above.
 
 The allowance for an active subscription is
 `max(10 GiB, 75 GiB * remaining_seconds / (30 * 86400))`, rounded down to

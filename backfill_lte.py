@@ -19,7 +19,8 @@ from pathlib import Path
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from bot.services.panel_api_service import PanelApiService, PanelUnavailableError
+from bot.services.panel_api_service import PanelApiService, index_panel_users
+from bot.utils.async_utils import run_bounded
 from bot.utils.date_utils import as_utc
 from config.settings import Settings
 from db.dal import lte_dal
@@ -54,7 +55,8 @@ def allowance_for_expiry(end_date: datetime | None, at: datetime) -> int:
 
 
 async def transfer_user(session: AsyncSession, panel, user_id: int,
-                        at: datetime, *, apply: bool) -> TransferResult:
+                        at: datetime, *, apply: bool,
+                        panel_users: dict[str, dict] | None = None) -> TransferResult:
     """The caller commits one user at a time; errors roll the whole user back."""
     account = await lte_dal.lock_account(session, user_id)
     user = await session.get(User, user_id)
@@ -96,7 +98,8 @@ async def transfer_user(session: AsyncSession, panel, user_id: int,
         result.status, result.detail = "needs_review", "Subscription and user panel references must be synchronized first"
         return result
     if panel_ref:
-        panel_user = await panel.get_user_by_ref(panel_ref)
+        panel_user = (await panel.get_user_by_ref(panel_ref) if panel_users is None
+                      else panel_users.get(str(panel_ref)))
         if not panel_user or panel_user.get("error"):
             result.status, result.detail = "error", "Cannot read the panel user; no changes applied"
             return result
@@ -124,33 +127,43 @@ async def backfill_users(factory, panel, *, apply: bool, emit) -> Counter:
     counts = Counter()
     at = datetime.now(timezone.utc)
     cursor = None
+    try:
+        users = await panel.get_all_panel_users()
+        if users is None:
+            raise ValueError("Incomplete panel snapshot")
+        panel_users = index_panel_users(users)
+    except Exception:
+        emit(TransferResult(0, "error", detail="Cannot read complete panel snapshot; no changes applied"))
+        counts["error"] += 1
+        return counts
+
+    async def transfer(user_id):
+        try:
+            async with factory() as session:
+                result = await transfer_user(session, panel, user_id, at, apply=apply,
+                                             panel_users=panel_users)
+                if apply and result.status == "applied":
+                    await session.commit()
+                else:
+                    await session.rollback()
+        except Exception as exc:
+            # SQL/HTTP exception strings can contain credentials or private
+            # response data. Emit only the class, never a raw traceback.
+            result = TransferResult(user_id, "error", detail=f"Rolled back ({type(exc).__name__})")
+        # Report immediately after each user's transaction, not after the full
+        # batch: interruption must not hide already committed work in memory.
+        emit(result)
+        counts[result.status] += 1
+
     while True:
         async with factory() as session:
-            query = select(User.user_id).order_by(User.user_id).limit(100)
+            query = select(User.user_id).order_by(User.user_id).limit(1000)
             if cursor is not None:
                 query = query.where(User.user_id > cursor)
             ids = list((await session.execute(query)).scalars())
         if not ids:
             return counts
-        for user_id in ids:
-            try:
-                async with factory() as session:
-                    result = await transfer_user(session, panel, user_id, at, apply=apply)
-                    if apply and result.status == "applied":
-                        await session.commit()
-                    else:
-                        await session.rollback()
-            except PanelUnavailableError:
-                result = TransferResult(user_id, "error", detail="Panel unavailable; stopped, rerun later")
-                emit(result)
-                counts[result.status] += 1
-                return counts
-            except Exception as exc:
-                # SQL/HTTP exception strings can contain credentials or private
-                # response data. Emit only the class, never a raw traceback.
-                result = TransferResult(user_id, "error", detail=f"Rolled back ({type(exc).__name__})")
-            emit(result)
-            counts[result.status] += 1
+        await run_bounded(ids, transfer)
         cursor = ids[-1]
 
 

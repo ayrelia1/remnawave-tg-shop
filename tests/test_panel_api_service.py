@@ -142,7 +142,7 @@ async def test_stream_follows_cursor_until_exhausted(panel_settings):
     assert panel.calls[2][2]["params"]["cursor"] == "c2"
 
 
-async def test_stream_stops_when_cursor_missing_despite_has_more(panel_settings):
+async def test_stream_rejects_incomplete_snapshot_when_cursor_missing(panel_settings):
     panel = RecordingPanelApiService(
         panel_settings,
         [ok({"users": [panel_user()], "nextCursor": None, "hasMore": True})],
@@ -150,8 +150,50 @@ async def test_stream_stops_when_cursor_missing_despite_has_more(panel_settings)
 
     users = await panel.get_all_panel_users()
 
-    assert len(users) == 1
+    assert users is None
     assert len(panel.calls) == 1
+
+
+async def test_stream_reads_ten_thousand_users_in_ten_maximum_pages(panel_settings):
+    pages = [ok({"users": [panel_user(user_id=i) for i in range(start, start + 1000)],
+                 "nextCursor": str(start + 999), "hasMore": start < 9001})
+             for start in range(1, 10001, 1000)]
+    panel = RecordingPanelApiService(panel_settings, pages)
+    users = await panel.get_all_panel_users()
+    assert len(users) == 10000
+    assert len(panel.calls) == 10
+    assert all(call[2]["params"]["size"] == 1000 for call in panel.calls)
+
+
+async def test_stream_rejects_repeating_cursor(panel_settings):
+    panel = RecordingPanelApiService(panel_settings, [
+        ok({"users": [panel_user(user_id=i)], "nextCursor": "1", "hasMore": True})
+        for i in (1, 2)])
+    assert await panel.get_all_panel_users() is None
+    assert len(panel.calls) == 2
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"users": None, "hasMore": False},
+                                    {"users": [], "hasMore": "false"}])
+async def test_stream_rejects_malformed_snapshot(panel_settings, payload):
+    panel = RecordingPanelApiService(panel_settings, [ok(payload)])
+    assert await panel.get_all_panel_users() is None
+
+
+async def test_stream_does_not_accept_a_partial_result_when_a_later_page_disappears(panel_settings):
+    panel = RecordingPanelApiService(panel_settings, [
+        ok({"users": [panel_user(user_id=1)], "nextCursor": "1", "hasMore": True}),
+        api_error(404, "A062")])
+    assert await panel.get_all_panel_users() is None
+
+
+async def test_stream_caps_page_size_and_follows_a_zero_cursor(panel_settings):
+    panel = RecordingPanelApiService(panel_settings, [
+        ok({"users": [panel_user(user_id=0)], "nextCursor": "0", "hasMore": True}),
+        ok({"users": [panel_user(user_id=1)], "nextCursor": None, "hasMore": False})])
+    users = await panel.get_all_panel_users(page_size=100000)
+    assert [user["id"] for user in users] == [0, 1]
+    assert panel.calls[1][2]["params"] == {"size": 1000, "cursor": "0"}
 
 
 async def test_stream_treats_users_not_found_as_empty(panel_settings):
