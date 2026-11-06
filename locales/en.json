@@ -688,5 +688,13 @@
   "admin_lte_already_applied": "::info:: This operation was already applied. The balance was not changed again.",
   "admin_lte_sync_pending": "::clock:: The balance was saved, but panel access has not updated yet. The scheduler will retry automatically.",
   "admin_lte_expired_message": "::warn:: This action was already completed or cancelled. Open the user's LTE traffic again.",
-  "lte_no_packages_message": "::info:: Traffic packages are currently unavailable. Try again later or contact support."
+  "lte_no_packages_message": "::info:: Traffic packages are currently unavailable. Try again later or contact support.",
+  "limiter_warning": "::warn:: <b>Device limit exceeded</b>\n\nYour device limit is <b>{device_limit}</b>.\nDetected: <b>{device_count} {measure}</b>; total IP addresses: <b>{ip_count}</b>.\n\n::lock:: To protect your access, your subscription link and credentials have been reset. The old link no longer works. Tap Connect to use the new link. Your expiry date and remaining traffic are unchanged.\n\nWarning <b>{number}/3</b>. A third violation within 48 hours of the first will disable this subscription.\n\nIf you believe this is a mistake, please contact support.",
+  "limiter_disabled": "::lock:: <b>Your subscription has been disabled</b>\n\nThis is the third device-limit violation — <b>{number}/3</b> within 48 hours.\nYour device limit is <b>{device_limit}</b>. Detected: <b>{device_count} {measure}</b>; total IP addresses: <b>{ip_count}</b>.\n\nPlease contact support to review the situation and restore access.",
+  "limiter_measure_ip": "active IP addresses",
+  "limiter_measure_subnet": "subnet groups",
+  "limiter_measure_asn": "ASN provider groups",
+  "log_limiter_action": "::warn:: <b>Limiter · warning {number}/3</b>\n\n::user:: {user_display}\nTelegram ID: <code>{user_id}</code>\nPanel ID: <code>{panel_user_ref}</code>\n\n::lock:: {action}\n::laptop:: Device limit: <b>{device_limit}</b>\nDetected: <b>{device_count} {measure}</b>; total IP addresses: <b>{ip_count}</b>.\n\n::clock:: {timestamp}",
+  "log_limiter_reset_action": "Subscription reset: credentials rotated and HWID devices cleared.",
+  "log_limiter_disabled_action": "Panel user disabled (DISABLED)."
 }

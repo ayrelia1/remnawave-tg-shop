@@ -128,6 +128,24 @@ async def upsert_subscription(session: AsyncSession,
         return new_sub
 
 
+async def get_subscription_for_panel_ref(
+        session: AsyncSession, panel_user_ref: str,
+        panel_subscription_uuid: Optional[str] = None) -> Optional[Subscription]:
+    """Resolve current/history rows without assuming one panel account per owner.
+
+    A shared reference with conflicting owners is ambiguous and must not be used
+    for an automated reset/disable. A rotated link can precede local cache repair.
+    """
+    rows = list((await session.scalars(select(Subscription).where(
+        Subscription.panel_user_uuid == panel_user_ref,
+    ).order_by(Subscription.is_active.desc(), Subscription.end_date.desc(),
+               Subscription.subscription_id.desc()))).all())
+    if not rows or len({row.user_id for row in rows}) != 1:
+        return None
+    return next((row for row in rows if panel_subscription_uuid
+                 and row.panel_subscription_uuid == panel_subscription_uuid), rows[0])
+
+
 async def rebind_panel_user_reference(
         session: AsyncSession, user_id: int, new_panel_user_ref: str) -> int:
     """Re-point a user's subscription rows at a new panel user reference.

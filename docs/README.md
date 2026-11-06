@@ -9,6 +9,7 @@ relevant to the task and verify details in source rather than duplicating code.
 | [AGENTS](../AGENTS.md) | Shared coding-agent entry: architecture, code map, contracts and checks |
 | [DESIGN](../DESIGN.md) | Telegram messages, buttons, localization and premium emoji |
 | [LTE traffic](LTE_TRAFFIC.md) | LTE balances, squads, notices, admin adjustments, backfill and controller logs |
+| [Limiter webhook](LIMITER.md) | Signed violation events, subscription warnings, key resets and disabling |
 | [SQL analytics](../scripts/analytics/README.md) | Report definitions, currency and calendar/cohort semantics |
 | [Memory](../memory/MEMORY.md) | Brief implementation context and caveats to recheck |
 

@@ -1,4 +1,7 @@
 import logging
+import hashlib
+from sqlalchemy import select
+from urllib.parse import urlsplit
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Tuple
@@ -16,6 +19,20 @@ from .panel_api_service import (
     extract_panel_user_ref,
     panel_username_for_telegram_id,
 )
+
+
+def subscription_reset_marker(panel_user: Dict[str, Any]) -> Optional[str]:
+    """Fingerprint resettable identity without persisting a subscription key/URL."""
+    identity = panel_user.get("shortUuid") or panel_user.get("subscriptionUuid")
+    if not identity and panel_user.get("subscriptionUrl"):
+        try:
+            url = urlsplit(panel_user["subscriptionUrl"])
+        except ValueError:
+            return None
+        identity = url.path + "?" + url.query
+    if not identity:
+        return None
+    return hashlib.sha256(str(identity).encode()).hexdigest()
 
 
 class SubscriptionService:
@@ -42,6 +59,63 @@ class SubscriptionService:
 
     async def has_had_any_subscription(self, session: AsyncSession, user_id: int) -> bool:
         return await subscription_dal.has_any_subscription_for_user(session, user_id)
+
+    async def reset_subscription_keys(
+        self, session: AsyncSession, user_id: int, panel_user_ref: str,
+        *, previous_marker: Optional[str] = None, require_hwid_cleanup: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Shared manual/limiter reset. Caller owns the transaction.
+
+        A durable previous_marker lets a retry recognize an accepted revoke whose
+        response or subsequent DB commit was lost, instead of rotating twice.
+        Neither expiry nor panel traffic counters/LTE credit are modified.
+        """
+        user = await session.scalar(select(User).where(User.user_id == user_id).with_for_update())
+        sub = await subscription_dal.get_subscription_for_panel_ref(session, panel_user_ref)
+        if user is None or (sub is not None and sub.user_id != user_id):
+            return None
+        if sub is None:
+            # My subscription supports linked panel accounts before their local
+            # history is imported. Preserve manual reset for that case too.
+            has_rows = await session.scalar(select(Subscription.subscription_id).where(
+                Subscription.panel_user_uuid == panel_user_ref).limit(1))
+            if user.panel_user_uuid != panel_user_ref or has_rows is not None:
+                return None
+        panel_user = await self.panel_service.get_user_by_ref(panel_user_ref)
+        if not panel_user or extract_panel_user_ref(panel_user) != panel_user_ref:
+            return None
+        if panel_user.get("telegramId") not in (None, 0, user_id):
+            return None
+        if sub is not None:
+            token = panel_user.get("subscriptionUuid") or panel_user.get("shortUuid")
+            sub = await subscription_dal.get_subscription_for_panel_ref(session, panel_user_ref, token)
+            if sub is None or sub.user_id != user_id:
+                return None
+        current_marker = subscription_reset_marker(panel_user)
+        if current_marker is None:
+            return None
+        if previous_marker is None or previous_marker == current_marker:
+            await self.panel_service.revoke_user_subscription(panel_user_ref)
+            panel_user = await self.panel_service.get_user_by_ref(panel_user_ref)
+            if not panel_user or subscription_reset_marker(panel_user) in (None, current_marker):
+                return None
+            if (extract_panel_user_ref(panel_user) != panel_user_ref
+                    or panel_user.get("telegramId") not in (None, 0, user_id)):
+                return None
+        try:
+            cleared = await self.panel_service.delete_all_user_hwid_devices(panel_user_ref)
+            if require_hwid_cleanup and not cleared:
+                return None
+        except Exception:
+            if require_hwid_cleanup:
+                raise
+            # Preserve the existing manual reset's best-effort HWID cleanup.
+            logging.warning("HWID cleanup failed after subscription key reset")
+        token = panel_user.get("subscriptionUuid") or panel_user.get("shortUuid")
+        if token and sub is not None:
+            await subscription_dal.update_subscription(session, sub.subscription_id,
+                                                       {"panel_subscription_uuid": token})
+        return panel_user
 
     async def has_active_subscription(self, session: AsyncSession, user_id: int) -> bool:
         """Return True if user currently has an active subscription (end_date in future)."""

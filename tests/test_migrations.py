@@ -32,7 +32,7 @@ from db.models import (  # noqa: E402
 )
 
 MIGRATIONS = REPO_ROOT / "alembic" / "versions"
-HEAD = "0011_lte_admin_alerts"
+HEAD = "0012_limiter_violations"
 
 
 @pytest.fixture(scope="module")

@@ -33,7 +33,7 @@ class NotificationService:
     def _thread_id_for(self, category: str) -> Optional[int]:
         """Return the appropriate thread ID for the given notification category.
 
-        Categories: 'users', 'purchases', 'statuses', 'backups'
+        Categories: 'users', 'purchases', 'statuses', 'backups', 'limiter'
         Falls back to LOG_THREAD_ID if topic-specific ID is not set.
         """
         mapping = {
@@ -41,6 +41,7 @@ class NotificationService:
             "purchases": self.settings.LOG_THREAD_ID_PURCHASES,
             "statuses": self.settings.LOG_THREAD_ID_STATUSES,
             "backups": self.settings.LOG_THREAD_ID_BACKUPS,
+            "limiter": getattr(self.settings, "LIMITER_CHAT_THREAD_ID", None),
         }
         specific = mapping.get(category)
         return specific if specific is not None else self.settings.LOG_THREAD_ID
@@ -230,6 +231,32 @@ class NotificationService:
         # Send to log channel (users topic)
         profile_keyboard = self._build_profile_keyboard(_, user_id, referred_by_id)
         await self._send_to_log_channel(message, thread_id=self._thread_id_for("users"), reply_markup=profile_keyboard)
+
+    async def notify_limiter_action(
+        self, user_id: int, panel_user_ref: str, warning_number: int,
+        device_limit: int, device_count: int, ip_count: int, grouping_mode: str,
+        username: Optional[str] = None, first_name: Optional[str] = None,
+    ) -> None:
+        """Log a committed reset/disable using the shared admin queue and profile button."""
+        admin_lang = self.settings.DEFAULT_LANGUAGE
+        _ = lambda k, **kw: self.i18n.gettext(admin_lang, k, **kw) if self.i18n else k
+        message = _(
+            "log_limiter_action",
+            number=warning_number,
+            action=_("log_limiter_disabled_action" if warning_number == 3 else "log_limiter_reset_action"),
+            user_display=hd.quote(self._format_user_display(user_id, username, first_name)),
+            user_id=user_id,
+            panel_user_ref=hd.quote(str(panel_user_ref)),
+            device_limit=device_limit,
+            device_count=device_count,
+            ip_count=ip_count,
+            measure=_("limiter_measure_" + grouping_mode),
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        )
+        await self._send_to_log_channel(
+            message, thread_id=self._thread_id_for("limiter"),
+            reply_markup=self._build_profile_keyboard(_, user_id),
+        )
 
     async def notify_payment_received(self, user_id: int, amount: float, currency: str,
                                     months: int, payment_provider: str,

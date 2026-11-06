@@ -20,6 +20,7 @@ from bot.services.severpay_service import SeverPayService
 from bot.services.lknpd_service import LknpdService
 from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
+from bot.services.limiter_service import LimiterService
 
 
 def build_core_services(
@@ -116,6 +117,8 @@ def build_core_services(
         logging.debug("Suppressed exception in bot/app/factories/build_services.py: %s", exc)
 
     return {
+        "limiter_service": LimiterService(settings, panel_service, subscription_service, bot, i18n,
+                                          notification_service=notification_service),
         "panel_service": panel_service,
         "subscription_service": subscription_service,
         "referral_service": referral_service,

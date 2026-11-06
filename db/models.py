@@ -88,6 +88,43 @@ class Subscription(Base):
         return f"<Subscription(id={self.subscription_id}, user_id={self.user_id}, panel_uuid='{self.panel_user_uuid}', ends='{self.end_date}')>"
 
 
+class LimiterViolation(Base):
+    """Durable limiter inbox, scoped to a stable panel account rather than its owner."""
+
+    __tablename__ = "limiter_violations"
+    __table_args__ = (
+        UniqueConstraint("event_hash", name="uq_limiter_violation_event_hash"),
+        CheckConstraint("warning_number IS NULL OR warning_number BETWEEN 1 AND 3", name="ck_limiter_warning_number"),
+        CheckConstraint("device_limit > 0 AND effective_limit >= device_limit AND ip_count > 0 "
+                        "AND device_count > 0 AND device_count <= ip_count", name="ck_limiter_counts"),
+        Index("ix_limiter_panel_history", "panel_user_ref", "id"),
+        Index("ix_limiter_pending", "stage", "next_attempt_at", "id"),
+        Index("ix_limiter_received_at", "received_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subscription_id = Column(Integer, ForeignKey("subscriptions.subscription_id", ondelete="SET NULL"), nullable=True)
+    panel_user_ref = Column(String, nullable=False)
+    telegram_id = Column(BigInteger, nullable=False)  # Owner snapshot for identity checks, not the counter key.
+    event_hash = Column(String(64), nullable=False)
+    reported_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    window_started_at = Column(DateTime(timezone=True), nullable=True)
+    window_expires_at = Column(DateTime(timezone=True), nullable=True)
+    warning_number = Column(Integer, nullable=True)
+    device_limit = Column(Integer, nullable=False)
+    effective_limit = Column(Integer, nullable=False)
+    ip_count = Column(Integer, nullable=False)
+    device_count = Column(Integer, nullable=False)
+    grouping_mode = Column(String(8), nullable=False)
+    stage = Column(String(16), nullable=False, default="pending", server_default="pending")
+    reset_marker = Column(String(64), nullable=True)  # Hash only; never store a subscription URL/key here.
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_error = Column(String(64), nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Payment(Base):
     __tablename__ = "payments"
 

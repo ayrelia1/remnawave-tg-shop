@@ -1040,7 +1040,8 @@ async def reset_subscription_do_handler(
         return
 
     try:
-        result = await panel_service.revoke_user_subscription(user_uuid)
+        result = await subscription_service.reset_subscription_keys(
+            session, callback.from_user.id, user_uuid)
     except PanelUnavailableError as exc:
         logging.warning("Panel unavailable during revoke for %s: %s", user_uuid, exc)
         try:
@@ -1054,13 +1055,6 @@ async def reset_subscription_do_handler(
         except Exception as exc:
             logging.debug("Suppressed exception in bot/handlers/user/subscription/core.py: %s", exc)
         return
-
-    try:
-        await panel_service.delete_all_user_hwid_devices(user_uuid)
-    except PanelUnavailableError as exc:
-        logging.warning("Panel unavailable during HWID cleanup for %s: %s", user_uuid, exc)
-    except Exception as exc:
-        logging.error("Failed to delete HWID devices for %s: %s", user_uuid, exc)
 
     try:
         await callback.answer(get_text("reset_subscription_success"), show_alert=True)

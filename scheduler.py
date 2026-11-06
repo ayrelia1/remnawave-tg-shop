@@ -32,6 +32,8 @@ from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
 from bot.services.name_bonus_service import NameBonusService
 from bot.services.lte_service import LteService
+from bot.services.limiter_service import LimiterService
+from bot.services.subscription_service import SubscriptionService
 from bot.utils.message_queue import init_queue_manager
 from config.logging_config import setup_logging
 
@@ -68,6 +70,15 @@ async def run_scheduler():
     name_bonus_service = NameBonusService(settings, bot, panel_service, i18n)
 
     scheduler = AsyncIOScheduler()
+
+    limiter_service = LimiterService(
+        settings, panel_service, SubscriptionService(settings, panel_service, bot, i18n), bot, i18n,
+        notification_service=notification_service)
+    async def job_limiter():
+        await limiter_service.run_checks(session_factory)
+
+    scheduler.add_job(job_limiter, IntervalTrigger(minutes=1), id="limiter_violations",
+                      name="Limiter warnings", replace_existing=True, coalesce=True, max_instances=1)
 
     lte_service = LteService(settings, panel_service, bot, i18n)
     async def job_lte():

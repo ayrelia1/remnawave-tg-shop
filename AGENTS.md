@@ -15,6 +15,7 @@ require explicit authorization. Never print private `.env` or customer secrets.
 - [Documentation map](docs/README.md): existing topic guides and source references.
 - [DESIGN](DESIGN.md): Telegram UI, localization and premium emoji conventions.
 - [LTE guide](docs/LTE_TRAFFIC.md): accounting, legacy conversion and rollout.
+- [Limiter](docs/LIMITER.md): signed inbox, subscription-scoped warning window and reset/disable processing.
 - [Analytics](scripts/analytics/README.md): SQL metric and time-window definitions.
 - [Memory](memory/MEMORY.md): short notes to verify against code, not a second spec.
 
@@ -76,6 +77,10 @@ are in memory; do not assume restart durability or shared multi-worker state.
   Legacy day-based credit requires explicit backfill, never automatic startup.
 - Use RU/EN locale keys. Rich emoji tokens are for HTML bodies; button/alert
   text stays plain, buttons use shared `icon_custom_emoji_id`. Follow DESIGN.
+- Limiter warnings belong to the stable panel ID, not Telegram user or rotating
+  link. On 3/3 only disable that subscription; do not set User.is_banned or add a
+  permanent activation guard. Webhooks process immediately; scheduler retries
+  unfinished events through the same processor. Shared key reset preserves expiry/LTE state.
 
 Main DB groups: User/Subscription/Payment; LteAccount/LteGrant; saved billing
 methods; promos/discounts; name-bonus claims; action logs/sync status; campaign

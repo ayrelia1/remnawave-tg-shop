@@ -35,6 +35,7 @@ async def build_and_start_web_app(
         "platega_service",
         "cispay_service",
         "severpay_service",
+        "limiter_service",
     ):
         # Access dispatcher workflow_data directly to avoid sequence protocol issues
         if hasattr(dp, "workflow_data") and key in dp.workflow_data:  # type: ignore
@@ -69,6 +70,9 @@ async def build_and_start_web_app(
     from bot.services.platega_service import platega_webhook_route
     from bot.services.cispay_service import cispay_webhook_route
     from bot.services.severpay_service import severpay_webhook_route
+    from bot.services.limiter_service import limiter_webhook_route
+
+    app.router.add_post("/webhook/limiter", limiter_webhook_route)
 
     cp_path = settings.cryptopay_webhook_path
     if cp_path.startswith("/"):

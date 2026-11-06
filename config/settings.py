@@ -249,6 +249,10 @@ class Settings(BaseSettings):
     TARIFF_SWITCH_DOWNGRADE_ENABLED: bool = Field(default=True)
 
     PANEL_WEBHOOK_SECRET: Optional[str] = Field(default=None)
+    LIMITER_WEBHOOK_SECRET: Optional[str] = Field(
+        default=None, description="Shared HMAC secret for remnawave-limiter; empty disables the integration")
+    LIMITER_CHAT_THREAD_ID: Optional[int] = Field(
+        default=None, description="Limiter reset/disable notification topic in LOG_CHAT_ID; falls back to LOG_THREAD_ID")
 
     TRAFFIC_PACKAGES: Optional[str] = Field(
         default=None,
@@ -335,6 +339,12 @@ class Settings(BaseSettings):
     def validate_lte_configuration(self):
         if self.LTE_ENFORCEMENT_ENABLED and not self.parsed_lte_squad_uuids:
             raise ValueError("LTE_SQUAD_UUIDS is required when LTE enforcement is enabled")
+        return self
+
+    @model_validator(mode="after")
+    def validate_limiter_configuration(self):
+        if self.LIMITER_WEBHOOK_SECRET and not (self.SUPPORT_LINK or "").strip():
+            raise ValueError("SUPPORT_LINK is required when LIMITER_WEBHOOK_SECRET is configured")
         return self
     USER_SQUAD_UUIDS: Optional[str] = Field(
         default=None,
@@ -904,6 +914,7 @@ class Settings(BaseSettings):
         'CRYPT4_REDIRECT_URL',
         'TELEGRAM_WEBHOOK_SECRET',
         'PANEL_WEBHOOK_SECRET',
+        'LIMITER_WEBHOOK_SECRET',
         'PRIVACY_POLICY_URL',
         mode='before',
     )
@@ -925,6 +936,7 @@ class Settings(BaseSettings):
         'LOG_THREAD_ID_PURCHASES',
         'LOG_THREAD_ID_STATUSES',
         'LOG_THREAD_ID_BACKUPS',
+        'LIMITER_CHAT_THREAD_ID',
         'YOOKASSA_TAX_SYSTEM_CODE',
         mode='before'
     )
