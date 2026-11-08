@@ -20,6 +20,7 @@ from bot.services.limiter_service import LimiterService, limiter_webhook_route
 from bot.services.panel_api_service import PanelUnavailableError
 from bot.services.subscription_service import SubscriptionService, subscription_reset_marker
 from db.models import Base, LimiterViolation, LteAccount, Subscription, User
+from tests.conftest import RecordingPanelApiService, api_error, ok
 
 # The production web app uses string dependency keys; exercise that existing convention.
 pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
@@ -55,7 +56,7 @@ class FakePanel:
         if self.fail_clear_once:
             self.fail_clear_once = False
             raise PanelUnavailableError("test cleanup outage")
-        return True
+        return 0
 
     async def update_user_status_on_panel(self, ref, enable):
         self.disables.append((ref, enable))
@@ -173,6 +174,39 @@ async def test_valid_signed_hook_processes_immediately_and_scheduler_does_not_re
     assert response.status == 200 and (await response.json())["status"] == "duplicate"
     await setup.service.run_checks(setup.factory)
     assert setup.panel.revokes == ["42"] and len(setup.bot.messages) == 1
+
+
+@pytest.mark.parametrize("first_cleanup_fails", [False, True])
+async def test_empty_hwid_list_completes_signed_webhook(setup, client, panel_settings, first_cleanup_fails):
+    sub_id = await seed(setup)
+    responses = [ok({"total": 0, "devices": []})]
+    if first_cleanup_fails:
+        responses.insert(0, api_error(403))
+    panel = RecordingPanelApiService(panel_settings, responses)
+    setup.panel.delete_all_user_hwid_devices = panel.delete_all_user_hwid_devices
+    admin = AsyncMock()
+    setup.service.notification_service = admin
+    raw = body()
+    headers = signed(setup, raw)
+
+    if first_cleanup_fails:
+        response = await client.post("/webhook/limiter", data=raw, headers=headers)
+        assert response.status == 503
+        assert setup.panel.revokes == ["42"] and not setup.bot.messages
+        admin.notify_limiter_action.assert_not_awaited()
+
+    response = await client.post("/webhook/limiter", data=raw, headers=headers)
+    assert response.status == 200
+    async with setup.factory() as session:
+        row = await session.scalar(select(LimiterViolation))
+        assert row.stage == "done" and row.warning_number == 1
+        assert (await session.get(Subscription, sub_id)).panel_subscription_uuid == "rotated-1-42"
+
+    response = await client.post("/webhook/limiter", data=raw, headers=headers)
+    assert response.status == 200 and (await response.json())["status"] == "duplicate"
+    assert setup.panel.revokes == ["42"] and len(setup.bot.messages) == 1
+    assert len(panel.calls) == len(responses)
+    admin.notify_limiter_action.assert_awaited_once()
 
 
 @pytest.mark.parametrize("kind", ["missing", "bad", "stale", "future", "tampered"])

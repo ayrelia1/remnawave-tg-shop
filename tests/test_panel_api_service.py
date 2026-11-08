@@ -479,6 +479,13 @@ async def test_delete_all_hwid_devices_falls_back_to_device_count(panel_settings
     assert await panel.delete_all_user_hwid_devices("42") == 1
 
 
+@pytest.mark.parametrize("response", [api_error(403), ok({}), ok(None)])
+async def test_delete_all_hwid_devices_returns_none_when_cleanup_is_unconfirmed(panel_settings, response):
+    panel = RecordingPanelApiService(panel_settings, [response])
+
+    assert await panel.delete_all_user_hwid_devices("42") is None
+
+
 # --------------------------------------------------------------------------
 # System routes and the removed happ crypt tool
 # --------------------------------------------------------------------------

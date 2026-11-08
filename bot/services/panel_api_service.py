@@ -777,13 +777,13 @@ class PanelApiService:
         )
         return False
 
-    async def delete_all_user_hwid_devices(self, user_ref: str) -> int:
-        """POST /api/hwid/devices/delete-all — one call replaces the per-device loop."""
+    async def delete_all_user_hwid_devices(self, user_ref: str) -> Optional[int]:
+        """Return the remaining device count, or None if cleanup was not confirmed."""
         numeric_id = panel_user_id(user_ref)
         if numeric_id is None:
             logging.error(
                 "Cannot delete HWID devices: '%s' is not a numeric panel id.", user_ref)
-            return 0
+            return None
 
         response_data = await self._request(
             "POST", "/hwid/devices/delete-all", json={"userId": numeric_id}
@@ -792,19 +792,19 @@ class PanelApiService:
             response_data, f"delete_all_user_hwid_devices({user_ref})"
         )
         if response_data and not response_data.get("error"):
-            payload = response_data.get("response") or {}
-            deleted = payload.get("total")
-            if deleted is None:
-                deleted = len(payload.get("devices") or [])
-            logging.info(
-                f"Deleted {deleted} HWID devices for user {user_ref}."
-            )
-            return int(deleted)
+            payload = response_data.get("response")
+            if isinstance(payload, dict):
+                remaining = payload.get("total")
+                devices = payload.get("devices")
+                if remaining is None and isinstance(devices, list):
+                    remaining = len(devices)
+                if type(remaining) is int and remaining >= 0:
+                    logging.info("HWID cleanup completed for user %s; remaining devices: %s.",
+                                 user_ref, remaining)
+                    return remaining
 
-        logging.error(
-            f"Failed to delete all HWID devices for user {user_ref}. Response: {response_data}"
-        )
-        return 0
+        logging.error("Could not confirm HWID cleanup for user %s.", user_ref)
+        return None
 
     async def get_subscription_link(
             self,

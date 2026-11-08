@@ -103,8 +103,8 @@ class SubscriptionService:
                     or panel_user.get("telegramId") not in (None, 0, user_id)):
                 return None
         try:
-            cleared = await self.panel_service.delete_all_user_hwid_devices(panel_user_ref)
-            if require_hwid_cleanup and not cleared:
+            remaining_devices = await self.panel_service.delete_all_user_hwid_devices(panel_user_ref)
+            if require_hwid_cleanup and remaining_devices is None:
                 return None
         except Exception:
             if require_hwid_cleanup:
