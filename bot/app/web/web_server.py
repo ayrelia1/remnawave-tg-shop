@@ -71,8 +71,10 @@ async def build_and_start_web_app(
     from bot.services.cispay_service import cispay_webhook_route
     from bot.services.severpay_service import severpay_webhook_route
     from bot.services.limiter_service import limiter_webhook_route
+    from bot.services.custom_torrent_reporter import torrent_webhook_route
 
     app.router.add_post("/webhook/limiter", limiter_webhook_route)
+    app.router.add_post("/webhook/torrent", torrent_webhook_route)
 
     cp_path = settings.cryptopay_webhook_path
     if cp_path.startswith("/"):

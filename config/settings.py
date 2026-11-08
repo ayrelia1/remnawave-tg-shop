@@ -1,6 +1,6 @@
 import logging
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, HttpUrl, ValidationError, computed_field, field_validator, model_validator
+from pydantic import Field, HttpUrl, SecretStr, ValidationError, computed_field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from .traffic import GIB, traffic_bytes
 
@@ -255,6 +255,16 @@ class Settings(BaseSettings):
         default=None, description="Shared HMAC secret for remnawave-limiter; empty disables the integration")
     LIMITER_CHAT_THREAD_ID: Optional[int] = Field(
         default=None, description="Limiter reset/disable notification topic in LOG_CHAT_ID; falls back to LOG_THREAD_ID")
+    CUSTOM_TORRENT_REPORTER_ENABLED: bool = False
+    CUSTOM_TORRENT_REPORTER_SECRET: Optional[SecretStr] = None
+    CUSTOM_TORRENT_REPORTER_THREAD_ID: Optional[int] = Field(default=None, gt=0)
+    CUSTOM_TORRENT_REPORTER_COOLDOWN_MINUTES: int = Field(default=60, ge=0, le=525600)
+
+    @property
+    def custom_torrent_reporter_active(self) -> bool:
+        return bool(self.CUSTOM_TORRENT_REPORTER_ENABLED
+                    and self.CUSTOM_TORRENT_REPORTER_SECRET
+                    and self.CUSTOM_TORRENT_REPORTER_THREAD_ID and self.LOG_CHAT_ID)
 
     TRAFFIC_PACKAGES: Optional[str] = Field(
         default=None,
@@ -917,6 +927,7 @@ class Settings(BaseSettings):
         'TELEGRAM_WEBHOOK_SECRET',
         'PANEL_WEBHOOK_SECRET',
         'LIMITER_WEBHOOK_SECRET',
+        'CUSTOM_TORRENT_REPORTER_SECRET',
         'PRIVACY_POLICY_URL',
         mode='before',
     )
@@ -939,6 +950,7 @@ class Settings(BaseSettings):
         'LOG_THREAD_ID_STATUSES',
         'LOG_THREAD_ID_BACKUPS',
         'LIMITER_CHAT_THREAD_ID',
+        'CUSTOM_TORRENT_REPORTER_THREAD_ID',
         'YOOKASSA_TAX_SYSTEM_CODE',
         mode='before'
     )

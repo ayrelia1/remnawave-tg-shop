@@ -26,6 +26,7 @@ from bot.keyboards.inline import partner_keyboards as pk  # noqa: E402
 HANDLER_FILES = (
     "bot/handlers/admin/ads.py",
     "bot/handlers/admin/currency_rates.py",
+    "bot/handlers/admin/custom_torrent.py",
     "bot/handlers/user/partner.py",
 )
 LOCALE_CONSUMERS = HANDLER_FILES + (
@@ -114,7 +115,7 @@ def _handler_matchers():
         src = io.open(REPO_ROOT / path, encoding="utf-8").read()
         exact |= set(re.findall(r'F\.data\s*==\s*"([^"]+)"', src))
         prefixes |= set(re.findall(r'F\.data\.startswith\("([^"]+)"\)', src))
-    # Shared navigation targets handled outside these two modules.
+    # Shared navigation targets handled outside these modules.
     exact |= {
         "admin_action:main",
         "main_action:back_to_main",

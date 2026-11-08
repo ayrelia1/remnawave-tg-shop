@@ -30,6 +30,7 @@ from bot.middlewares.i18n import get_i18n_instance
 from bot.services.panel_api_service import PanelApiService
 from bot.services.notification_service import NotificationService
 from bot.services.backup_service import BackupService
+from bot.services.custom_torrent_reporter import CustomTorrentReporter
 from bot.services.name_bonus_service import NameBonusService
 from bot.services.lte_service import LteService
 from bot.services.limiter_service import LimiterService
@@ -79,6 +80,12 @@ async def run_scheduler():
 
     scheduler.add_job(job_limiter, IntervalTrigger(minutes=1), id="limiter_violations",
                       name="Limiter warnings", replace_existing=True, coalesce=True, max_instances=1)
+
+    if settings.custom_torrent_reporter_active:
+        torrent_reporter = CustomTorrentReporter(settings, panel_service, bot, i18n)
+        scheduler.add_job(torrent_reporter.run_checks, IntervalTrigger(seconds=5), args=(session_factory,),
+                          id="custom_torrent_reports", name="Custom torrent reports",
+                          replace_existing=True, coalesce=True, max_instances=1)
 
     lte_service = LteService(settings, panel_service, bot, i18n)
     async def job_lte():

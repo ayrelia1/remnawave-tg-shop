@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger, Index, text, CheckConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text, BigInteger, Index, text, CheckConstraint, JSON
 from sqlalchemy.orm import relationship, DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.sql import expression, func
@@ -123,6 +123,56 @@ class LimiterViolation(Base):
     next_attempt_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_error = Column(String(64), nullable=True)
     processed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class TorrentReport(Base):
+    """One alert in an atomically received page from the custom collector."""
+
+    __tablename__ = "torrent_reports"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "page", "alert_index", name="uq_torrent_report_page_alert"),
+        CheckConstraint("level IN ('low', 'medium', 'high', 'highest')", name="ck_torrent_report_level"),
+        CheckConstraint("warning_number BETWEEN 1 AND 3", name="ck_torrent_report_warning"),
+        CheckConstraint("processing_stage IN ('pending', 'admin_sent', 'done')", name="ck_torrent_report_stage"),
+        Index("ix_torrent_report_warnings", "panel_user_ref", "received_at", "id",
+              postgresql_where=text("warning_number IS NOT NULL"), sqlite_where=text("warning_number IS NOT NULL")),
+        Index("ix_torrent_report_pending", "id",
+              postgresql_where=text("processing_stage != 'done'"), sqlite_where=text("processing_stage != 'done'")),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    idempotency_key = Column(String(140), nullable=False)
+    batch_id = Column(String(128), nullable=False)
+    page = Column(Integer, nullable=False)
+    alert_index = Column(Integer, nullable=False)
+    panel_user_ref = Column(String(19), nullable=False)
+    telegram_user_id = Column(BigInteger, nullable=True)
+    subscription_id = Column(Integer, ForeignKey("subscriptions.subscription_id", ondelete="SET NULL"), nullable=True)
+    node_uuid = Column(String(128), nullable=False)
+    node_name = Column(String(255), nullable=False)
+    inbound_tag = Column(String(255), nullable=False)
+    client_ip = Column(String(45), nullable=False)
+    level = Column(String(7), nullable=False)
+    details = Column(JSON, nullable=False)
+    window_start = Column(DateTime(timezone=True), nullable=False)
+    window_end = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    decision = Column(String(32), nullable=True)
+    warning_number = Column(Integer, nullable=True)
+    processing_stage = Column(String(10), nullable=False, server_default="pending")
+
+
+class TorrentReportSettings(Base):
+    __tablename__ = "torrent_report_settings"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_torrent_report_settings_singleton"),
+        CheckConstraint("minimum_level IN ('low', 'medium', 'high', 'highest')", name="ck_torrent_report_min_level"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=False)
+    auto_response_enabled = Column(Boolean, nullable=False, server_default=expression.false())
+    minimum_level = Column(String(7), nullable=False, server_default="medium")
 
 
 class Payment(Base):

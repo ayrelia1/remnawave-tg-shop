@@ -234,13 +234,18 @@ def get_system_functions_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
         callback_data="admin_action:currency_rates",
         icon_custom_emoji_id=PREMIUM_EMOJI_COIN,
     )
+    builder.button(
+        text=_(key="admin_custom_torrent_button"),
+        callback_data="admin_torrent:open",
+        icon_custom_emoji_id=PREMIUM_EMOJI_DOCUMENT,
+    )
 
     builder.button(
         text=_(key="back_to_admin_panel_button"),
         callback_data="admin_action:main",
         icon_custom_emoji_id=PREMIUM_EMOJI_BACK,
     )
-    builder.adjust(2, 1, 2, 1)
+    builder.adjust(2, 1, 2, 1, 1, 1)
     return builder.as_markup()
 
 

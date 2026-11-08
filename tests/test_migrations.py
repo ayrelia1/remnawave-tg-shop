@@ -32,7 +32,7 @@ from db.models import (  # noqa: E402
 )
 
 MIGRATIONS = REPO_ROOT / "alembic" / "versions"
-HEAD = "0012_limiter_violations"
+HEAD = "0013_custom_torrent_reports"
 
 
 @pytest.fixture(scope="module")
