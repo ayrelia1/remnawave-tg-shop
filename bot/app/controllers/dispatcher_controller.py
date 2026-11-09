@@ -8,6 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy.orm import sessionmaker
 
 from config.settings import Settings
+from bot.handlers.admin.stars import AdminStarsMiddleware
 from bot.middlewares.db_session import DBSessionMiddleware
 from bot.middlewares.i18n import I18nMiddleware, get_i18n_instance, JsonI18n
 from bot.middlewares.ban_check_middleware import BanCheckMiddleware
@@ -32,6 +33,7 @@ def build_dispatcher(settings: Settings, async_session_factory: sessionmaker) ->
     dp["i18n_instance"] = i18n_instance
     dp["async_session_factory"] = async_session_factory
 
+    dp.update.outer_middleware(AdminStarsMiddleware(settings))
     dp.update.outer_middleware(DBSessionMiddleware(async_session_factory))
     dp.update.outer_middleware(I18nMiddleware(i18n=i18n_instance, settings=settings))
     dp.update.outer_middleware(ProfileSyncMiddleware())
