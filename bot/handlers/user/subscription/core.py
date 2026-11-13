@@ -462,10 +462,7 @@ async def my_subscription_command_handler(
         *base_markup.inline_keyboard,
     ]
     try:
-        # Build rows to prepend above the base "back" markup
-        prepend_rows = [[InlineKeyboardButton(
-            text=get_text("lte_topup_button"), callback_data="lte:packages",
-            icon_custom_emoji_id=PREMIUM_EMOJI_PACKAGE)]]
+        prepend_rows = []
 
         # 1) Mini-app connect button on top if enabled, otherwise fall back to config link URL
         if settings.SUBSCRIPTION_MINI_APP_URL:
@@ -486,6 +483,14 @@ async def my_subscription_command_handler(
                         icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
                     )
                 ])
+
+        prepend_rows.append([
+            InlineKeyboardButton(
+                text=get_text("lte_topup_button"),
+                callback_data="lte:packages",
+                icon_custom_emoji_id=PREMIUM_EMOJI_PACKAGE,
+            )
+        ])
 
         max_devices_display = _format_max_devices_display(active.get("max_devices"), get_text)
         current_devices_display = "?"

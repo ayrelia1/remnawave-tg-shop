@@ -62,9 +62,11 @@ async def test_my_subscription_shows_topup_and_rules_only_for_current_subscripti
     assert ("lte:packages" in actions) == can_topup
     assert ("rules:my_subscription" in actions) == can_topup
     if can_topup:
+        assert buttons[0].text == i18n.gettext("ru", "connect_button")
+        assert actions[1] == "lte:packages"
+        assert buttons[1].icon_custom_emoji_id
         assert actions[-2:] == ["rules:my_subscription", "main_action:back_to_main"]
         assert buttons[-2].icon_custom_emoji_id == PREMIUM_EMOJI_DOCUMENT
-        assert next(button for button in buttons if button.callback_data == "lte:packages").icon_custom_emoji_id
         assert i18n.gettext("ru", "subscription_not_active") not in edit.await_args.kwargs["caption"]
     else:
         assert "main_action:subscribe" in actions
