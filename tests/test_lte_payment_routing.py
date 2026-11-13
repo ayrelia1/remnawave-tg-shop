@@ -73,6 +73,8 @@ async def test_stars_only_offer_opens_checkout_with_fiat_providers_enabled(
             get_text=lambda key, **kw: i18n.gettext("ru", key, **kw), session=session,
             months=value, devices=devices, traffic_mode=traffic_mode, promo_code_service=None)
     edit.assert_awaited_once()
+    checkout_text = edit.await_args.args[1]
+    assert ("✅ Торрент" in checkout_text) is not traffic_mode
     markup = edit.await_args.kwargs["reply_markup"]
     callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
     assert sum(data.startswith("pay_stars:") for data in callbacks) == 1

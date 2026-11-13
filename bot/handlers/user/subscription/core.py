@@ -13,6 +13,7 @@ from config.settings import Settings
 from bot.keyboards.inline.user_keyboards import (
     get_device_tier_keyboard,
     get_subscription_period_keyboard,
+    get_subscription_rules_button,
     get_back_to_main_menu_markup,
     get_autorenew_confirm_keyboard,
 )
@@ -321,8 +322,10 @@ async def select_device_tier_callback(
         return
 
     text_content = get_text("select_subscription_period_for_devices", devices=devices)
-    reply_markup = get_subscription_period_keyboard(devices, tier_options, "RUB", current_lang, i18n,
-                                                    currencies=currencies)
+    reply_markup = get_subscription_period_keyboard(
+        devices, tier_options, "RUB", current_lang, i18n, currencies=currencies,
+        lte_bytes_by_period=settings.device_plan_lte_bytes,
+    )
     await edit_or_send_with_photo(
         message=callback.message,
         bot=callback.message.bot,
@@ -454,7 +457,10 @@ async def my_subscription_command_handler(
         text += "\n\n" + get_text("lte_subscription_balance", gb=f"{lte_remaining / 2**30:.2f}")
 
     base_markup = get_back_to_main_menu_markup(current_lang, i18n)
-    kb = base_markup.inline_keyboard
+    kb = [
+        [get_subscription_rules_button(current_lang, i18n, "my_subscription")],
+        *base_markup.inline_keyboard,
+    ]
     try:
         # Build rows to prepend above the base "back" markup
         prepend_rows = [[InlineKeyboardButton(

@@ -15,6 +15,7 @@ from db.models import User
 from bot.keyboards.inline.user_keyboards import (
     CHANNEL_SUBSCRIPTION_VERIFY_CALLBACK,
     CHANNEL_SUBSCRIPTION_WELCOME_VERIFY_PREFIX,
+    get_back_to_main_menu_markup,
     get_main_menu_inline_keyboard,
     get_language_selection_keyboard,
     get_channel_subscription_keyboard,
@@ -26,6 +27,7 @@ from bot.services.panel_api_service import PanelApiService, PanelUnavailableErro
 from bot.services.referral_service import ReferralService
 from bot.services.promo_code_service import PromoCodeService
 from config.settings import Settings
+from config.traffic import GIB
 from bot.middlewares.i18n import JsonI18n
 from bot.utils.text_sanitizer import sanitize_username, sanitize_display_name
 
@@ -401,6 +403,58 @@ async def send_info_section(
             await event.answer()
         except Exception as exc:
             logging.debug("Suppressed exception in send_info_section: %s", exc)
+
+
+@router.callback_query(F.data.in_({"rules:info", "rules:my_subscription"}))
+async def show_subscription_rules(
+    callback: types.CallbackQuery, settings: Settings, i18n_data: dict,
+) -> None:
+    lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    message = callback.message
+    if i18n is None:
+        await callback.answer("Please try again.", show_alert=True)
+        return
+    if not isinstance(message, types.Message):
+        await callback.answer(i18n.gettext(lang, "error_try_again"), show_alert=True)
+        return
+
+    available_periods = set().union(
+        *settings.device_subscription_options.values(),
+        *settings.device_stars_options.values(),
+    )
+    lte_example = ""
+    if {1, 3} <= available_periods:
+        lte_bytes_by_period = settings.device_plan_lte_bytes
+        one_month_gb = lte_bytes_by_period[1] // GIB
+        three_month_gb = lte_bytes_by_period[3] // GIB
+        example_key = "subscription_rules_lte_example"
+        if one_month_gb > 0 and all(
+            lte_bytes_by_period[months] == months * lte_bytes_by_period[1]
+            for months in available_periods
+        ):
+            example_key = "subscription_rules_lte_monthly_example"
+        lte_example = " " + i18n.gettext(
+            lang, example_key, one_month_gb=one_month_gb, three_month_gb=three_month_gb,
+        )
+
+    source = callback.data.split(":", 1)[1]
+    markup = get_back_to_main_menu_markup(lang, i18n, callback_data=f"main_action:{source}")
+    try:
+        # A photo menu needs a new message to display rules as plain text.
+        await message.answer(
+            i18n.gettext(lang, "subscription_rules_text", lte_example=lte_example),
+            parse_mode="HTML", reply_markup=markup,
+        )
+    except TelegramAPIError:
+        await callback.answer(i18n.gettext(lang, "error_try_again"), show_alert=True)
+        return
+
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except TelegramAPIError:
+        logging.debug("Could not clear the source menu after opening rules.")
+    await callback.answer()
 
 
 @router.message(CommandStart())
