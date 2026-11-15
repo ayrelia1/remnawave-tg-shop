@@ -322,10 +322,8 @@ async def select_device_tier_callback(
         return
 
     text_content = get_text("select_subscription_period_for_devices", devices=devices)
-    reply_markup = get_subscription_period_keyboard(
-        devices, tier_options, "RUB", current_lang, i18n, currencies=currencies,
-        lte_bytes_by_period=settings.device_plan_lte_bytes,
-    )
+    reply_markup = get_subscription_period_keyboard(devices, tier_options, "RUB", current_lang, i18n,
+                                                    currencies=currencies)
     await edit_or_send_with_photo(
         message=callback.message,
         bot=callback.message.bot,

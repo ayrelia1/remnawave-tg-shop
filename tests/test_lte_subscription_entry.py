@@ -130,8 +130,8 @@ async def test_rules_open_as_text_and_return_to_the_origin(flow, lang, source, p
     assert edit.media.caption == i18n.gettext(lang, expected_key)
 
 
-@pytest.mark.parametrize("lang,unit", [("ru", "ГБ"), ("en", "GB")])
-async def test_period_buttons_show_configured_lte_for_each_available_duration(i18n, monkeypatch, lang, unit):
+@pytest.mark.parametrize("lang,month_label", [("ru", "мес."), ("en", "mo.")])
+async def test_period_buttons_show_duration_and_price(i18n, monkeypatch, lang, month_label):
     settings = Settings(_env_file=None, BOT_TOKEN="test", DEVICE_PLANS_RUB="2:100,0,0,850",
                         STARS_ENABLED=True, DEVICE_PLANS_STARS="2:0,400,0,0",
                         DEVICE_PLANS_LTE_GB="60,125,360,0")
@@ -147,8 +147,8 @@ async def test_period_buttons_show_configured_lte_for_each_available_duration(i1
     assert [row[0].callback_data for row in rows[:-1]] == [
         "subscribe_period:2:1", "subscribe_period:2:3", "subscribe_period:2:12"
     ]
-    assert [row[0].text.split(" · ")[-1] for row in rows[:-1]] == [
-        f"60 {unit} LTE", f"125 {unit} LTE", f"0 {unit} LTE"
+    assert [row[0].text for row in rows[:-1]] == [
+        f"1 {month_label} - 100 RUB", f"3 {month_label} - 400 ⭐", f"12 {month_label} - 850 RUB"
     ]
 
 

@@ -3,7 +3,6 @@ from aiogram.types import InlineKeyboardMarkup, WebAppInfo
 from typing import Dict, Optional, List, Literal, Tuple
 
 from config.settings import Settings
-from config.traffic import GIB
 
 from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_ADD,
@@ -341,11 +340,9 @@ def get_device_tier_keyboard(tier_min_prices: Dict[int, float],
     return builder.as_markup()
 
 
-def get_subscription_period_keyboard(
-    devices: int, tier_options: Dict[int, float], currency_symbol_val: str,
-    lang: str, i18n_instance, currencies: Optional[Dict[int, str]] = None,
-    *, lte_bytes_by_period: Dict[int, int],
-) -> InlineKeyboardMarkup:
+def get_subscription_period_keyboard(devices: int, tier_options: Dict[int, float],
+                                     currency_symbol_val: str, lang: str,
+                                     i18n_instance, currencies: Optional[Dict[int, str]] = None) -> InlineKeyboardMarkup:
     """Second step of the device-plan flow: choose duration for a chosen tier."""
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
@@ -357,8 +354,7 @@ def get_subscription_period_keyboard(
             text=_("subscribe_for_months_button",
                    months=months,
                    price=_fmt_price(price),
-                   currency_symbol=(currencies or {}).get(months, currency_symbol_val),
-                   lte_gb=lte_bytes_by_period[months] // GIB),
+                   currency_symbol=(currencies or {}).get(months, currency_symbol_val)),
             callback_data=f"subscribe_period:{int(devices)}:{months}",
             icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
         )
