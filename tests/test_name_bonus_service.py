@@ -131,7 +131,7 @@ def test_main_menu_button_respects_switch():
     subscription_index = callbacks.index("main_action:my_subscription")
     assert callbacks[subscription_index + 1] == "tasks:menu"
     assert "name_bonus:claim" not in callbacks
-    assert enabled.inline_keyboard[-1][0].text == "menu_channel_subscribe_button"
+    assert all(button.url != options.REQUIRED_CHANNEL_LINK for row in enabled.inline_keyboard for button in row)
     options.NAME_BONUS_ENABLED = False
     disabled = get_main_menu_inline_keyboard("ru", i18n, options)
     assert not any(button.callback_data == "tasks:menu" for row in disabled.inline_keyboard for button in row)

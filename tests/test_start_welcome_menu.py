@@ -152,6 +152,7 @@ def test_channel_keyboard_preserves_the_legacy_callback(welcome_env):
         "ru", i18n, "https://t.me/channel", welcome_channel_id=-100123
     )
 
+    assert normal.inline_keyboard[0][0].url == "https://t.me/channel"
     assert normal.inline_keyboard[-1][0].callback_data == "channel_subscription:verify"
     assert welcome.inline_keyboard[-1][0].callback_data == WELCOME_CALLBACK
     assert len(WELCOME_CALLBACK.encode()) <= 64
@@ -190,6 +191,28 @@ async def test_new_user_first_menu_is_short_and_next_start_is_full(welcome_env, 
     assert "main_action:my_subscription" in _actions(_last_menu(env))
     assert "tasks:menu" in _actions(_last_menu(env))
     assert env["menu"].await_args.kwargs["caption"] == first_caption
+
+
+@pytest.mark.parametrize("lang,link,title,display,url", [
+    ("ru", "https://t.me/channel", "Новости", "@channel", "https://t.me/channel"),
+    ("ru", "@channel", "Новости", "@channel", "https://t.me/channel"),
+    ("en", "https://t.me/+invite", "News", "Open channel", "https://t.me/+invite"),
+    ("ru", None, "Новости", None, None),
+])
+async def test_start_puts_the_news_link_at_the_end_of_the_caption(welcome_env, lang, link, title, display, url):
+    env = welcome_env
+    env["user"] = _db_user()
+    env["dependencies"]["settings"].REQUIRED_CHANNEL_LINK = link
+    env["dependencies"]["i18n_data"]["current_language"] = lang
+
+    await start_handlers.start_command_handler(env["message"], env["state"], **env["dependencies"])
+
+    caption = env["menu"].await_args.kwargs["caption"]
+    if url:
+        assert caption.endswith(f'{title} — <a href="{url}">{display}</a>')
+        assert all(button.url != link for row in _last_menu(env).inline_keyboard for button in row)
+    else:
+        assert title not in caption
 
 
 @pytest.mark.parametrize("event", ["start", "legacy_verify"])

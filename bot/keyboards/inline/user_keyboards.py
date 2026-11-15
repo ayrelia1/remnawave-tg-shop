@@ -143,15 +143,6 @@ def get_main_menu_inline_keyboard(
             )
         )
 
-    if settings.REQUIRED_CHANNEL_LINK:
-        builder.row(
-            InlineKeyboardButton(
-                text=_(key="menu_channel_subscribe_button"),
-                url=settings.REQUIRED_CHANNEL_LINK,
-                icon_custom_emoji_id=PREMIUM_EMOJI_MEGAPHONE,
-            )
-        )
-
     return builder.as_markup()
 
 

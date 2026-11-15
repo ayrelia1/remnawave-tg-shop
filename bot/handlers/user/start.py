@@ -1,5 +1,6 @@
 import logging
 import re
+from html import escape
 from aiogram import Router, F, types, Bot
 from aiogram.utils.text_decorations import html_decoration as hd
 from aiogram.filters import CommandStart, Command
@@ -149,6 +150,17 @@ async def send_main_menu(target_event: Union[types.Message,
 
     if panel_unavailable:
         text = text + "\n\n" + _(key="panel_unavailable_notice")
+
+    channel_url = (settings.REQUIRED_CHANNEL_LINK or "").strip()
+    if channel_url:
+        if channel_url.startswith("@"):
+            channel_url = f"https://t.me/{channel_url[1:]}"
+        public_channel = re.fullmatch(
+            r"https?://(?:www\.)?(?:t\.me|telegram\.me)/(?:s/)?([A-Za-z0-9_]+)/?(?:[?#].*)?",
+            channel_url, re.IGNORECASE,
+        )
+        label = f"@{public_channel[1]}" if public_channel else _("channel_subscription_join_button")
+        text += "\n\n" + _("main_menu_news", channel_link=hd.link(hd.quote(label), escape(channel_url)))
 
     reply_markup = get_main_menu_inline_keyboard(current_lang, i18n, settings,
                                                  show_trial_button_in_menu,
