@@ -1,6 +1,8 @@
 import hashlib
 import logging
 import math
+import re
+from html import escape, unescape
 from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
@@ -39,6 +41,7 @@ from bot.constants.premium_emoji import (
 )
 
 router = Router(name="user_subscription_core_router")
+TELEGRAM_PHOTO_CAPTION_LIMIT = 1024
 
 
 # Map raw panel statuses to localized i18n keys (RU/EN come from locale files).
@@ -441,8 +444,8 @@ async def my_subscription_command_handler(
         end_date=end_date.strftime("%d.%m.%Y") if end_date else "N/A",
         days_left=max(0, days_left),
         status=_localize_status(active.get("status_from_panel"), get_text),
-        config_link=config_link_value,
-        max_devices=max_devices_display,
+        config_link=escape(config_link_value, quote=False),
+        max_devices=escape(max_devices_display, quote=False),
         traffic_limit=(f"{active['traffic_limit_bytes'] / 2**30:.2f} GB" if active.get("traffic_limit_bytes") else get_text("traffic_unlimited")),
         traffic_used=(
             f"{active['traffic_used_bytes'] / 2**30:.2f} GB" if active.get("traffic_used_bytes") is not None else get_text("traffic_na")
@@ -454,11 +457,14 @@ async def my_subscription_command_handler(
     if lte_remaining is not None:
         text += "\n\n" + get_text("lte_subscription_balance", gb=f"{lte_remaining / 2**30:.2f}")
 
-    base_markup = get_back_to_main_menu_markup(current_lang, i18n)
-    kb = [
-        [get_subscription_rules_button(current_lang, i18n, "my_subscription")],
-        *base_markup.inline_keyboard,
-    ]
+    rules = get_text("subscription_rules_inline")
+    caption_with_rules = f"{text}\n\n<blockquote expandable>{rules}</blockquote>"
+    plain_caption = unescape(re.sub(r"<[^>]+>", "", caption_with_rules))
+    kb = get_back_to_main_menu_markup(current_lang, i18n).inline_keyboard
+    if len(plain_caption.encode("utf-16-le")) // 2 <= TELEGRAM_PHOTO_CAPTION_LIMIT:
+        text = caption_with_rules
+    else:
+        kb = [[get_subscription_rules_button(current_lang, i18n, "my_subscription")], *kb]
     try:
         prepend_rows = []
 

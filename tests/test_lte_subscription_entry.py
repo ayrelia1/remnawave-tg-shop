@@ -15,7 +15,7 @@ from bot.handlers.user import start
 from bot.handlers.user.subscription import core
 from bot.keyboards.inline.user_keyboards import get_info_keyboard, get_lte_packages_keyboard
 from bot.middlewares.i18n import JsonI18n
-from db.models import Subscription
+from db.models import LteAccount, Subscription
 from config.settings import Settings
 from test_lte_service import flow as lte_flow_fixture
 
@@ -27,18 +27,21 @@ def i18n():
     return JsonI18n(str(Path(__file__).resolve().parents[1] / "locales"), premium_emoji=False)
 
 
+@pytest.mark.parametrize("lang", ["ru", "en"])
 @pytest.mark.parametrize("scenario,can_topup", [
     ("new", False), ("expired", False), ("stale_active", False),
     ("disabled", False), ("orphan", True), ("missing_panel", False), ("paid", True), ("trial", True),
+    ("long_key", True),
 ])
 async def test_my_subscription_shows_topup_and_rules_only_for_current_subscription(
-        flow, i18n, monkeypatch, scenario, can_topup):
+        flow, i18n, monkeypatch, lang, scenario, can_topup):
     now = datetime.now(timezone.utc)
     end_date = now + timedelta(days=-1 if scenario in {"expired", "stale_active"} else 1)
     panel_status = "EXPIRED" if scenario == "expired" else "DISABLED" if scenario == "disabled" else "ACTIVE"
+    config_link = "https://example.test/sub/" + ("x" * 600 if scenario == "long_key" else "short")
     details = None if scenario in {"new", "missing_panel"} else {
         "user_id": "42", "end_date": end_date, "status_from_panel": panel_status,
-        "config_link": "https://example.test/sub/short", "max_devices": 2,
+        "config_link": config_link, "max_devices": 2,
     }
     subscription_service = SimpleNamespace(get_active_subscription_details=AsyncMock(return_value=details))
     panel_service = SimpleNamespace(get_user_devices=AsyncMock(return_value=[]))
@@ -54,20 +57,40 @@ async def test_my_subscription_shows_topup_and_rules_only_for_current_subscripti
             session.add(Subscription(user_id=1, panel_user_uuid="42", panel_subscription_uuid="short",
                                      end_date=end_date, is_active=True,
                                      duration_months=0 if scenario == "trial" else 1))
-            await session.commit()
-        await core.my_subscription_command_handler(event, {"i18n_instance": i18n}, flow.settings,
-                                                   panel_service, subscription_service, session, bot)
+        if can_topup:
+            session.add(LteAccount(user_id=1, credited_bytes=25 * 2**30))
+        await session.commit()
+        await core.my_subscription_command_handler(
+            event, {"i18n_instance": i18n, "current_language": lang}, flow.settings,
+            panel_service, subscription_service, session, bot,
+        )
     buttons = [button for row in edit.await_args.kwargs["reply_markup"].inline_keyboard for button in row]
     actions = [button.callback_data for button in buttons]
+    caption = edit.await_args.kwargs["caption"]
     assert ("lte:packages" in actions) == can_topup
-    assert ("rules:my_subscription" in actions) == can_topup
+    assert ("<blockquote expandable>" in caption) == (can_topup and scenario != "long_key")
+    assert ("rules:my_subscription" in actions) == (scenario == "long_key")
     if can_topup:
-        assert buttons[0].text == i18n.gettext("ru", "connect_button")
+        assert buttons[0].text == i18n.gettext(lang, "connect_button")
         assert actions[1] == "lte:packages"
         assert buttons[1].icon_custom_emoji_id
-        assert actions[-2:] == ["rules:my_subscription", "main_action:back_to_main"]
-        assert buttons[-2].icon_custom_emoji_id == PREMIUM_EMOJI_DOCUMENT
-        assert i18n.gettext("ru", "subscription_not_active") not in edit.await_args.kwargs["caption"]
+        assert actions[-1] == "main_action:back_to_main"
+        assert i18n.gettext(lang, "subscription_not_active") not in caption
+        balance = i18n.gettext(lang, "lte_subscription_balance", gb="25.00")
+        if scenario == "long_key":
+            assert buttons[-2].callback_data == "rules:my_subscription"
+            assert buttons[-2].icon_custom_emoji_id == PREMIUM_EMOJI_DOCUMENT
+            assert f"<code>{config_link}</code>" in caption
+            assert caption.endswith(balance)
+        else:
+            assert caption.endswith(
+                f"{balance}\n\n<blockquote expandable>"
+                + i18n.gettext(lang, "subscription_rules_inline")
+                + "</blockquote>"
+            )
+            assert "✅ Торрент" in caption
+            if lang == "ru":
+                assert "LTE трафик расходуется только на LTE-серверах" in caption
     else:
         assert "main_action:subscribe" in actions
 
