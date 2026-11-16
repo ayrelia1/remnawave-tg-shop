@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.middlewares.i18n import JsonI18n
-from bot.constants.premium_emoji import PREMIUM_EMOJI_CONNECT, PREMIUM_EMOJI_SUPPORT
+from bot.constants.premium_emoji import PREMIUM_EMOJI_PAPER_PLANE, PREMIUM_EMOJI_SUPPORT
 from bot.services.panel_api_service import PanelApiService, extract_panel_user_ref
 from bot.services.notification_service import NotificationService
 from bot.services.subscription_service import SubscriptionService, subscription_reset_marker
@@ -373,8 +373,12 @@ class LimiterService:
             link = links[1]
             if not link:
                 raise LimiterActionError("connection_link_missing")
-            buttons.append([InlineKeyboardButton(text=_("connect_button"), url=link,
-                                                 icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT)])
+            buttons.append([InlineKeyboardButton(
+                text=_("connect_button"),
+                url=link,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                style="primary",
+            )])
         buttons.append([InlineKeyboardButton(text=_("menu_support_button"), url=self.settings.SUPPORT_LINK,
                                              icon_custom_emoji_id=PREMIUM_EMOJI_SUPPORT)])
         text = _("limiter_disabled" if event.warning_number == 3 else "limiter_warning",

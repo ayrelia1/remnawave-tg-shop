@@ -11,7 +11,6 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_BOOK,
     PREMIUM_EMOJI_CANCEL,
     PREMIUM_EMOJI_COIN,
-    PREMIUM_EMOJI_CONNECT,
     PREMIUM_EMOJI_CRYPTO,
     PREMIUM_EMOJI_DELETE,
     PREMIUM_EMOJI_DOCUMENT,
@@ -20,6 +19,7 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_LINK_OUT,
     PREMIUM_EMOJI_MEGAPHONE,
     PREMIUM_EMOJI_NEXT,
+    PREMIUM_EMOJI_PAPER_PLANE,
     PREMIUM_EMOJI_PAY,
     PREMIUM_EMOJI_REFERRAL,
     PREMIUM_EMOJI_STAR,
@@ -53,7 +53,8 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                style="primary",
             )
         )
     elif not show_welcome_menu and connect_url:
@@ -61,7 +62,8 @@ def get_main_menu_inline_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 url=connect_url,
-                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                style="primary",
             )
         )
 
@@ -731,7 +733,8 @@ def get_connect_and_main_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                style="primary",
             )
         )
     elif button_target:
@@ -739,7 +742,8 @@ def get_connect_and_main_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 url=button_target,
-                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                style="primary",
             )
         )
     else:
@@ -747,7 +751,8 @@ def get_connect_and_main_keyboard(
             InlineKeyboardButton(
                 text=_("connect_button"),
                 callback_data="main_action:my_subscription",
-                icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                style="primary",
             )
         )
 

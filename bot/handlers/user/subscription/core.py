@@ -32,11 +32,13 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_CANCEL,
     PREMIUM_EMOJI_COIN,
     PREMIUM_EMOJI_COMPUTER,
-    PREMIUM_EMOJI_CONNECT,
     PREMIUM_EMOJI_HAND_STOP,
     PREMIUM_EMOJI_PACKAGE,
+    PREMIUM_EMOJI_PAPER_PLANE,
     PREMIUM_EMOJI_REFRESH,
+    PREMIUM_EMOJI_RENEW_CALENDAR,
     PREMIUM_EMOJI_SUBSCRIBE,
+    PREMIUM_EMOJI_TARIFF_TAG,
     PREMIUM_EMOJI_YES,
 )
 
@@ -474,7 +476,8 @@ async def my_subscription_command_handler(
                 InlineKeyboardButton(
                     text=get_text("connect_button"),
                     web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
-                    icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                    icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                    style="primary",
                 )
             ])
         else:
@@ -484,7 +487,8 @@ async def my_subscription_command_handler(
                     InlineKeyboardButton(
                         text=get_text("connect_button"),
                         url=cfg_link_val,
-                        icon_custom_emoji_id=PREMIUM_EMOJI_CONNECT,
+                        icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE,
+                        style="primary",
                     )
                 ])
 
@@ -534,21 +538,23 @@ async def my_subscription_command_handler(
                     renew_devices = int(panel_devices)
                 else:
                     renew_devices = settings.base_device_limit
+            plan_buttons = []
             if renew_devices is not None and int(renew_devices) in settings.device_tiers:
-                prepend_rows.append([
+                plan_buttons.append(
                     InlineKeyboardButton(
                         text=get_text("renew_subscription_button"),
                         callback_data=f"subscribe_tier:{int(renew_devices)}",
-                        icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+                        icon_custom_emoji_id=PREMIUM_EMOJI_RENEW_CALENDAR,
                     )
-                ])
-            prepend_rows.append([
+                )
+            plan_buttons.append(
                 InlineKeyboardButton(
                     text=get_text("change_tariff_button"),
                     callback_data="main_action:subscribe",
-                    icon_custom_emoji_id=PREMIUM_EMOJI_SUBSCRIBE,
+                    icon_custom_emoji_id=PREMIUM_EMOJI_TARIFF_TAG,
                 )
-            ])
+            )
+            prepend_rows.append(plan_buttons)
 
         # 2) Auto-renew toggle (YooKassa only)
         if local_sub and local_sub.provider == "yookassa" and settings.yookassa_autopayments_active:
