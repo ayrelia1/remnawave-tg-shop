@@ -22,6 +22,7 @@ from bot.constants.premium_emoji import (
     PREMIUM_EMOJI_PAPER_PLANE,
     PREMIUM_EMOJI_PAY,
     PREMIUM_EMOJI_REFERRAL,
+    PREMIUM_EMOJI_RUBLE,
     PREMIUM_EMOJI_STAR,
     PREMIUM_EMOJI_STATS,
     PREMIUM_EMOJI_SUBSCRIBE,
@@ -414,13 +415,13 @@ def get_payment_method_keyboard(months: int, price: Optional[float],
             builder.button(
                 text=_("pay_with_platega_button"),
                 callback_data=f"pay_platega:{value_str}:{price}{mode_suffix}",
-                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+                icon_custom_emoji_id=PREMIUM_EMOJI_RUBLE,
             )
         elif method == "cispay" and getattr(settings, "CISPAY_ENABLED", False):
             builder.button(
                 text=_("pay_with_cispay_button"),
                 callback_data=f"pay_cispay:{value_str}:{price}{mode_suffix}",
-                icon_custom_emoji_id=PREMIUM_EMOJI_PAY,
+                icon_custom_emoji_id=PREMIUM_EMOJI_RUBLE,
             )
         elif method == "yookassa" and settings.YOOKASSA_ENABLED:
             builder.button(
