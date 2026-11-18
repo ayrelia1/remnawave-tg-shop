@@ -161,6 +161,9 @@ class TorrentReport(Base):
     decision = Column(String(32), nullable=True)
     warning_number = Column(Integer, nullable=True)
     processing_stage = Column(String(10), nullable=False, server_default="pending")
+    reset_marker = Column(String(64), nullable=True)  # Hash only; never store a subscription URL/key here.
+    block_mode = Column(String(8), nullable=True)
+    block_seconds = Column(Integer, nullable=True)
 
 
 class TorrentReportSettings(Base):

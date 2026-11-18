@@ -19,6 +19,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from alembic.config import Config  # noqa: E402
+from alembic.migration import MigrationContext  # noqa: E402
+from alembic.operations import Operations  # noqa: E402
 from alembic.script import ScriptDirectory  # noqa: E402
 
 from db.models import (  # noqa: E402
@@ -29,10 +31,11 @@ from db.models import (  # noqa: E402
     NameBonusClaim,
     Payment,
     PartnerPayout,
+    TorrentReport,
 )
 
 MIGRATIONS = REPO_ROOT / "alembic" / "versions"
-HEAD = "0013_custom_torrent_reports"
+HEAD = "0014_torrent_subscription_reset"
 
 
 @pytest.fixture(scope="module")
@@ -66,6 +69,34 @@ def _load(name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_torrent_reset_migration_preserves_report_history_on_upgrade_and_downgrade():
+    previous = _load("0013_custom_torrent_reports")
+    migration = _load(HEAD)
+    with sa.create_engine("sqlite://").begin() as connection:
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            previous.upgrade()
+            connection.exec_driver_sql(
+                "INSERT INTO torrent_reports (batch_id, page, alert_index, idempotency_key, "
+                "panel_user_ref, node_uuid, node_name, inbound_tag, client_ip, level, details, "
+                "window_start, window_end, created_at, decision, warning_number) "
+                "VALUES ('test', 1, 0, 'test', '42', 'node', 'node', 'tag', '192.0.2.1', 'high', '{}', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'disable_pending', 3)"
+            )
+            migration.upgrade()
+            columns = {column["name"] for column in sa.inspect(connection).get_columns("torrent_reports")}
+            assert columns == set(TorrentReport.__table__.columns.keys())
+            row = connection.execute(sa.select(
+                TorrentReport.decision, TorrentReport.warning_number, TorrentReport.reset_marker,
+                TorrentReport.block_mode, TorrentReport.block_seconds,
+            )).one()
+            assert row == ("disable_pending", 3, None, None, None)
+
+            migration.downgrade()
+            row = connection.exec_driver_sql("SELECT decision, warning_number FROM torrent_reports").one()
+            assert row == ("disable_pending", 3)
 
 
 def _captured_tables(module, builder_name):

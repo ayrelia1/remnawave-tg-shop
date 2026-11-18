@@ -178,6 +178,8 @@ class PanelApiService:
                        method: str,
                        endpoint: str,
                        log_full_response: bool = False,
+                       *,
+                       sensitive_body: bool = False,
                        **kwargs) -> Optional[Dict[str, Any]]:
         if not self.base_url:
             logging.error(
@@ -205,7 +207,7 @@ class PanelApiService:
             "POST", "PATCH", "PUT"
         ] else None
         log_prefix = f"Panel API Req: {method.upper()} {url_with_params_for_log}"
-        if json_payload_for_log:
+        if json_payload_for_log and not sensitive_body:
             try:
                 sanitized_payload = self._sanitize_payload_for_log(json_payload_for_log)
                 payload_str = json.dumps(sanitized_payload)
@@ -223,7 +225,9 @@ class PanelApiService:
                 log_suffix = f"| Status: {response_status}"
 
                 should_log_full_body = bool(log_full_response and self.settings.LOG_LEVEL == "DEBUG")
-                if should_log_full_body or not (200 <= response_status < 300):
+                if sensitive_body:
+                    logging.debug("%s %s", log_prefix, log_suffix)
+                elif should_log_full_body or not (200 <= response_status < 300):
                     try:
                         parsed_json_for_log = json.loads(response_text)
                         pretty_response_text = json.dumps(parsed_json_for_log,
@@ -265,9 +269,7 @@ class PanelApiService:
                                 "data_text": response_text
                             }
                     except json.JSONDecodeError as e_json_ok:
-                        logging.error(
-                            f"{log_prefix} {log_suffix} | OK but JSON Parse Error. Error: {e_json_ok}. Body was logged above."
-                        )
+                        logging.error("%s %s | Invalid JSON response: %s", log_prefix, log_suffix, e_json_ok)
                         return {
                             "status": "success_parse_error",
                             "code": response_status,
@@ -436,7 +438,8 @@ class PanelApiService:
         endpoint = f"/users/{numeric_id}"
         full_response = await self._request("GET",
                                             endpoint,
-                                            log_full_response=log_response)
+                                            log_full_response=log_response,
+                                            sensitive_body=True)
         self._raise_if_transient(full_response, f"get_user_by_ref({user_ref})")
         if full_response and not full_response.get(
                 "error") and "response" in full_response:
@@ -724,14 +727,13 @@ class PanelApiService:
             endpoint,
             json=payload,
             log_full_response=log_response,
+            sensitive_body=True,
         )
         self._raise_if_transient(response_data, f"revoke_user_subscription({user_ref})")
         if response_data and not response_data.get("error") and "response" in response_data:
             logging.info(f"Panel user {user_ref} subscription revoked successfully.")
             return response_data.get("response")
-        logging.error(
-            f"Failed to revoke subscription for user {user_ref}. Response: {response_data if not log_response else '(logged above)'}"
-        )
+        logging.error("Failed to revoke subscription for user %s.", user_ref)
         return None
 
     async def get_user_hwid_devices(self, user_ref: str) -> Optional[List[Dict[str, Any]]]:
@@ -786,7 +788,7 @@ class PanelApiService:
             return None
 
         response_data = await self._request(
-            "POST", "/hwid/devices/delete-all", json={"userId": numeric_id}
+            "POST", "/hwid/devices/delete-all", json={"userId": numeric_id}, sensitive_body=True,
         )
         self._raise_if_transient(
             response_data, f"delete_all_user_hwid_devices({user_ref})"
@@ -902,7 +904,7 @@ class PanelApiService:
             "POST",
             "/system/tools/happ/encrypt",
             json=payload,
-            log_full_response=False
+            sensitive_body=True,
         )
         if response_data and not response_data.get("error") and "response" in response_data:
             return (response_data.get("response") or {}).get("encryptedLink")
@@ -917,5 +919,5 @@ class PanelApiService:
                 )
             return None
 
-        logging.error(f"Failed to encrypt happ link. Response: {response_data}")
+        logging.error("Failed to encrypt happ link.")
         return None

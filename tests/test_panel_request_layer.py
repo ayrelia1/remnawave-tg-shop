@@ -91,6 +91,17 @@ async def test_json_body_is_parsed(make_panel):
     assert result == payload
 
 
+@pytest.mark.parametrize("status", [200, 400])
+async def test_subscription_revoke_response_is_not_logged(make_panel, caplog, status):
+    new_url = "https://panel.example/sub/private-test-key"
+    service, _ = make_panel(FakeResponse(status, body=json.dumps({"response": {"subscriptionUrl": new_url}})))
+    service.settings.LOG_LEVEL = "DEBUG"
+    caplog.set_level("DEBUG")
+    result = await service.revoke_user_subscription("42")
+    assert result == ({"subscriptionUrl": new_url} if status == 200 else None)
+    assert new_url not in caplog.text
+
+
 async def test_error_status_surfaces_error_code(make_panel):
     body = json.dumps({"errorCode": "A025", "message": "User not found"})
     service, _ = make_panel(FakeResponse(404, body=body))

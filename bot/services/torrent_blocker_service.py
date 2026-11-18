@@ -77,15 +77,18 @@ class TorrentReport(BaseModel):
 
 
 def resolve_host_name(event: TorrentReport, hosts: list[dict]) -> str:
+    return resolve_node_host_name(event.node, event.report.xrayReport.inboundTag, hosts)
+
+
+def resolve_node_host_name(node: ReportNode, tag: str | None, hosts: list[dict]) -> str:
     """Use a host remark only when node/profile/inbound identify one host."""
-    profile = event.node.configProfile
-    tag = event.report.xrayReport.inboundTag
+    profile = node.configProfile
     if profile is None or not profile.activeConfigProfileUuid or not tag:
-        return event.node.name
+        return node.name
     inbounds = [inbound for inbound in profile.activeInbounds
                 if inbound.tag == tag and inbound.profileUuid == profile.activeConfigProfileUuid]
     if len(inbounds) != 1:
-        return event.node.name
+        return node.name
     matches = []
     for host in hosts:
         inbound = host.get("inbound") or {}
@@ -93,13 +96,13 @@ def resolve_host_name(event: TorrentReport, hosts: list[dict]) -> str:
                 or inbound.get("configProfileInboundUuid") != str(inbounds[0].uuid)):
             continue
         nodes = host.get("nodes") or []
-        if nodes and str(event.node.uuid) not in nodes:
+        if nodes and str(node.uuid) not in nodes:
             continue
         matches.append(host)
     if len(matches) == 1 and isinstance(matches[0].get("remark"), str) and matches[0]["remark"].strip():
         # Bound escaped HTML as well as plain text to Telegram's message limit.
         return matches[0]["remark"].strip()[:512]
-    return event.node.name
+    return node.name
 
 
 class TorrentBlockerService:

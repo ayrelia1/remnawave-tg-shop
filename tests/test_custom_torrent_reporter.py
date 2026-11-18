@@ -22,11 +22,14 @@ from db.models import Base, Subscription, TorrentReport, TorrentReportSettings, 
 pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 NOW = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
 CHAT = -1001234567890
+NODE = "00000000-0000-4000-8000-000000000001"
+PROFILE = "00000000-0000-4000-8000-000000000002"
+INBOUND = "00000000-0000-4000-8000-000000000003"
 
 
 def payload(batch="sample", *, user="42", level="medium", page=1, pages=1):
     return {
-        "batch_id": batch, "auth": "test-secret", "node_uuid": "node",
+        "batch_id": batch, "auth": "test-secret", "node_uuid": NODE,
         "period_start": 1793920200, "period_end": 1793920800,
         "page": page, "total_pages": pages, "total_alerts": 1,
         "alerts": [{
@@ -55,8 +58,28 @@ async def reporter():
                         CUSTOM_TORRENT_REPORTER_SECRET="test-secret",
                         CUSTOM_TORRENT_REPORTER_THREAD_ID=123, LOG_CHAT_ID=CHAT)
     panel = AsyncMock()
-    panel.get_user_by_ref.return_value = {"id": 42, "telegramId": 100, "status": "ACTIVE",
-                                         "expireAt": (NOW + timedelta(days=30)).isoformat()}
+    panel.get_user_by_ref.return_value = {
+        "id": 42, "telegramId": 100, "status": "ACTIVE", "expireAt": (NOW + timedelta(days=30)).isoformat(),
+        "shortUuid": "link-42", "subscriptionUrl": "https://panel.example/sub/link-42",
+    }
+
+    async def revoke(ref):
+        assert ref == "42"
+        token = f"rotated-{panel.revoke_user_subscription.await_count}"
+        panel.get_user_by_ref.return_value.update(shortUuid=token, subscriptionUrl=f"https://panel.example/sub/{token}")
+
+    panel.revoke_user_subscription.side_effect = revoke
+    panel.delete_all_user_hwid_devices.return_value = 0
+    panel.get_nodes.return_value = [{
+        "uuid": NODE, "name": "Internal node", "configProfile": {
+            "activeConfigProfileUuid": PROFILE,
+            "activeInbounds": [{"uuid": INBOUND, "profileUuid": PROFILE, "tag": "tls<&"}],
+        },
+    }]
+    panel.get_hosts.return_value = [{
+        "remark": "Public <host>", "nodes": [NODE],
+        "inbound": {"configProfileUuid": PROFILE, "configProfileInboundUuid": INBOUND},
+    }]
     bot = AsyncMock()
     service = CustomTorrentReporter(settings, panel, bot, JsonI18n("locales", default="ru"))
     app = web.Application()
@@ -96,6 +119,10 @@ async def test_page_auth_validation_and_deduplication(reporter):
     invalid = copy.deepcopy(data)
     invalid["alerts"][1]["level"] = "critical"
     assert (await client.post("/webhook/torrent", json=invalid)).status == 400
+    for fields in ({"mode": "both"}, {"mod": "both"}, {"seconds": -1}, {"seconds": "300"}):
+        invalid = copy.deepcopy(data)
+        invalid["alerts"][1].update(fields)
+        assert (await client.post("/webhook/torrent", json=invalid)).status == 400
     assert await reports(factory) == []
     await submit(client, factory, data, key="sample:2")
     assert not bot.send_message.called
@@ -131,24 +158,94 @@ async def test_threshold_unknown_user_and_auto_off(reporter):
     panel.get_user_by_ref.assert_not_awaited()
 
 
-async def test_fixed_window_cooldown_and_scoped_disable(reporter):
+async def test_fixed_window_cooldown_and_repeated_scoped_resets(reporter):
     client, factory, service, panel, bot = reporter
-    for index, offset in enumerate((timedelta(), timedelta(days=4), timedelta(days=5),
-                                    timedelta(days=5, hours=1), timedelta(days=5, hours=2),
-                                    timedelta(days=5, hours=3))):
-        at = NOW + offset
+    for index, minutes in enumerate((0, 23 * 60, 24 * 60, 25 * 60, 26 * 60,
+                                     26 * 60 + 59, 27 * 60, 28 * 60, 29 * 60)):
+        at = NOW + timedelta(minutes=minutes)
         await submit(client, factory, payload(str(index), level="highest"), at=at)
         await service.run_checks(factory, now=at)
     rows = await reports(factory)
-    assert [row.warning_number for row in rows] == [1, 2, 1, 2, 3, None]
-    assert rows[-1].decision == "window_limit"
-    panel.update_user_status_on_panel.assert_awaited_once_with("42", False, log_response=False)
-    panel.revoke_user_subscription.assert_not_awaited()
+    assert [row.warning_number for row in rows] == [1, 2, 1, 2, 3, None, 1, 2, 3]
+    assert rows[5].decision == "cooldown"
+    assert [row.decision for row in rows if row.warning_number == 3] == ["reset", "reset"]
+    panel.update_user_status_on_panel.assert_not_awaited()
+    assert [call.args for call in panel.revoke_user_subscription.await_args_list] == [("42",)] * 2
+    assert [call.args for call in panel.delete_all_user_hwid_devices.await_args_list] == [("42",)] * 2
     async with factory() as session:
         subs = list(await session.scalars(select(Subscription).order_by(Subscription.panel_user_uuid)))
-        assert [(s.is_active, s.status_from_panel) for s in subs] == [(False, "DISABLED"), (True, "ACTIVE")]
+        assert all(s.is_active and s.status_from_panel == "ACTIVE"
+                   and s.end_date == (NOW + timedelta(days=30)).replace(tzinfo=None) for s in subs)
+        assert [s.panel_subscription_uuid for s in subs] == ["rotated-2", "link-43"]
         assert not (await session.get(User, 100)).is_banned
-    assert [call.args[0] for call in bot.send_message.await_args_list].count(100) == 5
+    assert [call.args[0] for call in bot.send_message.await_args_list].count(100) == 8
+    assert bot.send_message.await_args_list[-2].kwargs["reply_markup"].inline_keyboard[0][0].url.endswith("rotated-2")
+
+
+async def test_late_report_cannot_reopen_counted_history(reporter):
+    client, factory, service, _, _ = reporter
+    at = NOW + timedelta(hours=1)
+    await submit(client, factory, payload("first-visible"), at=at)
+    await service.run_checks(factory, now=at)
+    await submit(client, factory, payload("late-commit"), at=NOW)
+    await service.run_checks(factory, now=at)
+    rows = await reports(factory)
+    assert [(row.warning_number, row.decision) for row in rows] == [(1, "warn"), (None, "late_report")]
+
+
+@pytest.mark.parametrize(("mode", "lang", "address_text", "rules", "use_host"), [
+    ("inbound", "ru", "ваш IP-адрес <code>203.0.113.10</code>", "Скачивание и раздача", True),
+    ("outbound", "en", "IP addresses of the torrent peers", "Downloading and seeding", False),
+])
+@pytest.mark.parametrize("mode_field", ["mode", "mod"])
+async def test_block_notice_reports_mode_duration_and_server_rules(
+    reporter, mode, lang, address_text, rules, use_host, mode_field,
+):
+    client, factory, service, panel, bot = reporter
+    async with factory.begin() as session:
+        (await session.get(User, 100)).language_code = lang
+    if not use_host:
+        panel.get_nodes.return_value = []
+    data = payload()
+    metadata = data["alerts"][0] if mode == "inbound" else data
+    metadata.update({mode_field: mode, "seconds": 300})
+    if mode_field == "mode":
+        metadata["mod"] = "outbound" if mode == "inbound" else "inbound"
+    await submit(client, factory, data)
+    row = (await reports(factory))[0]
+    assert (row.block_mode, row.block_seconds) == (mode, 300)
+    await service.run_checks(factory, now=NOW)
+    notice = next(call.args[1] for call in bot.send_message.await_args_list if call.args[0] == 100)
+    assert address_text in notice and rules in notice
+    assert "<b>Torrent</b>" in notice and "300" in notice
+    assert ("Public &lt;host&gt;" if use_host else "Litva") in notice
+    if mode == "outbound":
+        assert row.client_ip not in notice
+
+
+@pytest.mark.parametrize("old_decision", ["disable_pending", "disabled"])
+async def test_old_third_warning_preserves_history_and_keeps_future_series_open(reporter, old_decision):
+    client, factory, service, panel, _ = reporter
+    for index in range(3):
+        at = NOW + timedelta(hours=index)
+        await submit(client, factory, payload(f"old-{index}"), at=at)
+        if index < 2:
+            await service.run_checks(factory, now=at)
+    old_third = (await reports(factory))[-1]
+    async with factory.begin() as session:
+        saved = await session.get(TorrentReport, old_third.id)
+        saved.telegram_user_id = 100
+        saved.decision = old_decision
+        saved.warning_number = 3
+        saved.processing_stage = "done" if old_decision == "disabled" else "admin_sent"
+    at += timedelta(hours=1)
+    await submit(client, factory, payload("after-upgrade"), at=at)
+    await service.run_checks(factory, now=at)
+    rows = await reports(factory)
+    assert rows[-2].decision == ("disabled" if old_decision == "disabled" else "reset")
+    assert (rows[-1].warning_number, rows[-1].decision) == (1, "warn")
+    assert panel.revoke_user_subscription.await_count == int(old_decision == "disable_pending")
+    panel.update_user_status_on_panel.assert_not_awaited()
 
 
 async def test_panel_outage_resumes_same_warning_without_second_admin_alert(reporter):
@@ -168,35 +265,60 @@ async def test_panel_outage_resumes_same_warning_without_second_admin_alert(repo
     await service.run_checks(factory, now=at + timedelta(seconds=30))
     assert (await reports(factory))[-1].processing_stage == "done"
     assert [call.args[0] for call in bot.send_message.await_args_list].count(CHAT) == 3
-    panel.update_user_status_on_panel.assert_awaited_once()
+    panel.revoke_user_subscription.assert_awaited_once()
 
 
-async def test_user_notice_retry_does_not_disable_a_renewed_subscription(reporter):
-    client, factory, service, panel, bot = reporter
-    for index in range(2):
+async def test_reports_after_cooldown_wait_for_pending_reset(reporter):
+    client, factory, service, panel, _ = reporter
+    for index in range(4):
         at = NOW + timedelta(hours=index)
-        await submit(client, factory, payload(str(index)), at=at)
+        if index == 2:
+            panel.get_user_by_ref.side_effect = PanelUnavailableError("test outage")
+        await submit(client, factory, payload(f"report-{index}"), at=at)
         await service.run_checks(factory, now=at)
-    at = NOW + timedelta(hours=2)
-    await submit(client, factory, payload("third"), at=at)
+    rows = await reports(factory)
+    assert [row.warning_number for row in rows] == [1, 2, 3, None]
+    assert rows[-1].decision is None
 
-    async def send(chat_id, text, **kwargs):
-        if chat_id != CHAT:
-            raise RuntimeError("Telegram unavailable")
-
-    bot.send_message.side_effect = send
-    await service.run_checks(factory, now=at)
-    row = (await reports(factory))[-1]
-    assert (row.decision, row.processing_stage) == ("disabled", "admin_sent")
-    async with factory.begin() as session:
-        sub = await session.get(Subscription, row.subscription_id)
-        sub.is_active = True
-        sub.status_from_panel = "ACTIVE"
-    bot.send_message.reset_mock(side_effect=True)
+    panel.get_user_by_ref.side_effect = None
     await service.run_checks(factory, now=at + timedelta(seconds=30))
-    panel.update_user_status_on_panel.assert_awaited_once()
-    bot.send_message.assert_not_awaited()
-    assert (await reports(factory))[-1].processing_stage == "done"
+    rows = await reports(factory)
+    assert [row.warning_number for row in rows] == [1, 2, 3, 1]
+    assert rows[-2].decision == "reset"
+    panel.revoke_user_subscription.assert_awaited_once()
+
+
+@pytest.mark.parametrize("lose_revoke_response", [True, False])
+async def test_reset_retry_after_restart_does_not_rotate_twice(reporter, lose_revoke_response):
+    client, factory, service, panel, bot = reporter
+    revoke = panel.revoke_user_subscription.side_effect
+
+    async def revoke_and_lose_response(ref):
+        await revoke(ref)
+        raise PanelUnavailableError("test lost response")
+
+    for index in range(3):
+        at = NOW + timedelta(hours=index)
+        if index == 2:
+            if lose_revoke_response:
+                panel.revoke_user_subscription.side_effect = revoke_and_lose_response
+            else:
+                panel.delete_all_user_hwid_devices.return_value = None
+        await submit(client, factory, payload(f"warn-{index}"), at=at)
+        await service.run_checks(factory, now=at)
+
+    row = (await reports(factory))[-1]
+    assert (row.decision, row.processing_stage) == ("reset_pending", "admin_sent")
+    assert row.reset_marker and len(row.reset_marker) == 64
+    panel.delete_all_user_hwid_devices.return_value = 0
+    bot.send_message.reset_mock()
+
+    restarted = CustomTorrentReporter(service.settings, panel, bot, service.i18n)
+    await restarted.run_checks(factory, now=at + timedelta(seconds=30))
+    panel.revoke_user_subscription.assert_awaited_once()
+    row = (await reports(factory))[-1]
+    assert (row.decision, row.processing_stage) == ("reset", "done")
+    assert [call.args[0] for call in bot.send_message.await_args_list] == [100]
 
 
 async def test_admin_topic_failure_does_not_block_or_repeat_personal_notices(reporter):
@@ -216,14 +338,14 @@ async def test_admin_topic_failure_does_not_block_or_repeat_personal_notices(rep
     notices = [call.args[1] for call in bot.send_message.await_args_list if call.args[0] == 100]
     assert len(notices) == 3
     assert all(f"{number}/3" in notice for number, notice in enumerate(notices, 1))
-    panel.update_user_status_on_panel.assert_awaited_once()
+    panel.revoke_user_subscription.assert_awaited_once()
     bot.send_message.reset_mock(side_effect=True)
     await service.run_checks(factory, now=at + timedelta(seconds=30))
     assert [call.args[0] for call in bot.send_message.await_args_list] == [CHAT] * 3
     assert all(row.processing_stage == "done" for row in await reports(factory))
 
 
-async def test_pending_user_warnings_delay_disable_without_hiding_admin_alerts(reporter):
+async def test_pending_user_warnings_delay_reset_without_hiding_admin_alerts(reporter):
     client, factory, service, panel, bot = reporter
 
     async def send(chat_id, text, **kwargs):
@@ -236,21 +358,21 @@ async def test_pending_user_warnings_delay_disable_without_hiding_admin_alerts(r
         await submit(client, factory, payload(f"user-notice-{index}"), at=at)
         await service.run_checks(factory, now=at)
 
-    panel.update_user_status_on_panel.assert_not_awaited()
+    panel.revoke_user_subscription.assert_not_awaited()
     assert [call.args[0] for call in bot.send_message.await_args_list].count(CHAT) == 3
     bot.send_message.reset_mock(side_effect=True)
     await service.run_checks(factory, now=at + timedelta(seconds=30))
     assert [call.args[0] for call in bot.send_message.await_args_list] == [100] * 3
     assert all(f"{number}/3" in call.args[1] for number, call in enumerate(bot.send_message.await_args_list, 1))
-    panel.update_user_status_on_panel.assert_awaited_once()
+    panel.revoke_user_subscription.assert_awaited_once()
 
 
 @pytest.mark.parametrize("new_policy, retry_at, result", [
     ({"auto_response_enabled": False}, timedelta(hours=3), "auto_off"),
     ({"minimum_level": "highest"}, timedelta(hours=3), "below_threshold"),
-    ({}, timedelta(days=10), "window_expired"),
+    ({}, timedelta(hours=26), "window_expired"),
 ])
-async def test_pending_disable_rechecks_policy_and_age(reporter, new_policy, retry_at, result):
+async def test_pending_reset_rechecks_policy_and_age(reporter, new_policy, retry_at, result):
     client, factory, service, panel, bot = reporter
     for index in range(3):
         at = NOW + timedelta(hours=index)
@@ -258,7 +380,7 @@ async def test_pending_disable_rechecks_policy_and_age(reporter, new_policy, ret
             panel.get_user_by_ref.side_effect = PanelUnavailableError("test outage")
         await submit(client, factory, payload(f"old-{index}"), at=at)
         await service.run_checks(factory, now=at)
-    assert (await reports(factory))[-1].decision == "disable_pending"
+    assert (await reports(factory))[-1].decision == "reset_pending"
 
     async with factory.begin() as session:
         policy = await session.get(TorrentReportSettings, 1)
@@ -266,7 +388,7 @@ async def test_pending_disable_rechecks_policy_and_age(reporter, new_policy, ret
             setattr(policy, key, value)
     panel.get_user_by_ref.side_effect = None
     await service.run_checks(factory, now=NOW + retry_at)
-    panel.update_user_status_on_panel.assert_not_awaited()
+    panel.revoke_user_subscription.assert_not_awaited()
     row = (await reports(factory))[-1]
     assert (row.decision, row.warning_number, row.processing_stage) == (result, None, "done")
 
@@ -287,7 +409,7 @@ async def test_switch_off_applies_to_remaining_reports_in_same_pass(reporter):
     assert (await reports(factory))[-1].decision == "auto_off"
 
 
-async def test_switch_off_during_panel_lookup_cancels_disable(reporter):
+async def test_switch_off_during_panel_lookup_cancels_reset(reporter):
     client, factory, service, panel, _ = reporter
     for index in range(2):
         at = NOW + timedelta(hours=index)
@@ -303,7 +425,7 @@ async def test_switch_off_during_panel_lookup_cancels_disable(reporter):
     at = NOW + timedelta(hours=2)
     await submit(client, factory, payload("switch-during-lookup"), at=at)
     await service.run_checks(factory, now=at)
-    panel.update_user_status_on_panel.assert_not_awaited()
+    panel.revoke_user_subscription.assert_not_awaited()
     assert (await reports(factory))[-1].decision == "auto_off"
 
 

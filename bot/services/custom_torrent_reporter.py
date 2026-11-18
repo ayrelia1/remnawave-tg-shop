@@ -12,23 +12,30 @@ from typing import Annotated, Any, Literal, get_args
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiohttp import web
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import AliasChoices, BaseModel, Field, StringConstraints, ValidationError, field_validator
 from sqlalchemy import insert, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 
+from bot.constants.premium_emoji import PREMIUM_EMOJI_PAPER_PLANE
 from bot.keyboards.inline.user_keyboards import get_user_banned_keyboard
 from bot.middlewares.i18n import JsonI18n
 from bot.services.panel_api_service import PanelApiService, PanelUnavailableError, extract_panel_user_ref
+from bot.services.subscription_service import SubscriptionService, subscription_reset_marker
+from bot.services.torrent_blocker_service import ReportNode, resolve_node_host_name
+from bot.utils.config_link import prepare_config_links
 from bot.utils.date_utils import as_utc
 from config.settings import Settings
 from db.dal import subscription_dal
-from db.models import Subscription, TorrentReport, TorrentReportSettings, User
+from db.models import TorrentReport, TorrentReportSettings, User
 
 TorrentLevel = Literal["low", "medium", "high", "highest"]
 TORRENT_LEVELS = get_args(TorrentLevel)
-WARNING_WINDOW = timedelta(days=5)
+WARNING_WINDOW = timedelta(days=1)
+RESET_PENDING = ("reset_pending", "disable_pending")  # Resume unfinished reports from the previous version.
 REPORT_RETRY_DELAY = timedelta(seconds=30)
 REPORT_BATCH_SIZE = 20
 USER_NOTICE_DONE = "_notice_done"
@@ -36,6 +43,8 @@ UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 Timestamp = Annotated[int, Field(ge=0, le=253402300799)]
 PageNumber = Annotated[int, Field(ge=1, le=2147483647)]
 Label = Annotated[str, StringConstraints(min_length=1, max_length=255)]
+BlockMode = Literal["inbound", "outbound"]
+BlockSeconds = Annotated[int, Field(ge=0, le=2147483647)]
 
 
 class TorrentAlert(BaseModel):
@@ -48,6 +57,8 @@ class TorrentAlert(BaseModel):
     client_ip: Annotated[str, StringConstraints(max_length=45)]
     level: TorrentLevel
     details: dict[str, Any]
+    mode: BlockMode | None = Field(default=None, validation_alias=AliasChoices("mode", "mod"))
+    seconds: BlockSeconds | None = None
 
     @field_validator("node_name", "inbound_tag")
     @classmethod
@@ -77,6 +88,8 @@ class TorrentPage(BaseModel):
     page: PageNumber
     total_pages: PageNumber
     alerts: list[TorrentAlert]
+    mode: BlockMode | None = Field(default=None, validation_alias=AliasChoices("mode", "mod"))
+    seconds: BlockSeconds | None = None
 
     @property
     def key(self) -> str:
@@ -91,6 +104,8 @@ async def _store_page(session: AsyncSession, payload: TorrentPage) -> bool:
         dict(batch_id=payload.batch_id, page=payload.page, idempotency_key=key, alert_index=index,
              node_uuid=payload.node_uuid, node_name=alert.node_name, inbound_tag=alert.inbound_tag,
              panel_user_ref=alert.user_id, client_ip=alert.client_ip, level=alert.level, details=alert.details,
+             block_mode=alert.mode or payload.mode,
+             block_seconds=alert.seconds if alert.seconds is not None else payload.seconds,
              window_start=UNIX_EPOCH + timedelta(seconds=alert.window_start),
              window_end=UNIX_EPOCH + timedelta(seconds=alert.window_end),
              created_at=UNIX_EPOCH + timedelta(seconds=alert.created_at))
@@ -136,18 +151,24 @@ async def torrent_webhook_route(request: web.Request) -> web.Response:
     return web.json_response({"status": "accepted" if accepted else "duplicate"})
 
 
-async def _latest_warnings(session: AsyncSession, panel_ref: str, limit: int = 3,
-                           *, before: TorrentReport | None = None):
-    statement = (
-        select(TorrentReport.warning_number, TorrentReport.received_at,
-               TorrentReport.decision, TorrentReport.processing_stage)
-        .where(TorrentReport.panel_user_ref == panel_ref, TorrentReport.warning_number.is_not(None))
+def _before(report: TorrentReport):
+    current = aliased(TorrentReport)
+    received_at = select(current.received_at).where(current.id == report.id).scalar_subquery()
+    return or_(
+        TorrentReport.received_at < received_at,
+        (TorrentReport.received_at == received_at) & (TorrentReport.id < report.id),
     )
-    if before is not None:
-        statement = statement.where(or_(
-            TorrentReport.received_at < before.received_at,
-            (TorrentReport.received_at == before.received_at) & (TorrentReport.id < before.id),
-        ))
+
+
+async def _latest_warnings(session: AsyncSession, report: TorrentReport, limit: int = 2, *, before: bool = True):
+    statement = (
+        select(TorrentReport.id, TorrentReport.warning_number, TorrentReport.received_at,
+               TorrentReport.decision, TorrentReport.processing_stage)
+        .where(TorrentReport.panel_user_ref == report.panel_user_ref,
+               TorrentReport.warning_number.is_not(None))
+    )
+    if before:
+        statement = statement.where(_before(report))
     return (await session.execute(
         statement.order_by(TorrentReport.received_at.desc(), TorrentReport.id.desc()).limit(limit)
     )).all()
@@ -165,7 +186,7 @@ def _previous_warning_pending(history) -> bool:
     return any(entry.decision == "warn" and entry.processing_stage != "done" for entry in history)
 
 
-def _cancel_disable(report: TorrentReport, reason: str) -> str:
+def _cancel_reset(report: TorrentReport, reason: str) -> str:
     report.warning_number = None
     report.decision = reason
     return reason
@@ -175,6 +196,7 @@ class CustomTorrentReporter:
     def __init__(self, settings: Settings, panel: PanelApiService, bot: Bot, i18n: JsonI18n):
         self.settings = settings
         self.panel = panel
+        self.subscriptions = SubscriptionService(settings, panel)
         self.bot = bot
         self.i18n = i18n
         self.cooldown = timedelta(minutes=settings.CUSTOM_TORRENT_REPORTER_COOLDOWN_MINUTES)
@@ -227,14 +249,16 @@ class CustomTorrentReporter:
             if report.decision is None:
                 await self._decide(session, report)
 
-        if report.decision == "disable_pending":
+        if report.decision is None:
+            return False
+        if report.decision in RESET_PENDING:
             try:
-                report.decision = await self._disable(factory, report, now)
+                report.decision = await self._reset(factory, report, now)
             except PanelUnavailableError:
                 logging.warning("Custom torrent report %s is waiting for the panel", report.id)
 
-        retry = report.decision == "disable_pending"
-        if report.decision in ("warn", "disabled"):
+        retry = report.decision in RESET_PENDING
+        if report.decision in ("warn", "reset", "disabled"):
             try:
                 retry = not await self._notify_user(factory, report)
             except TelegramRetryAfter:
@@ -274,64 +298,111 @@ class CustomTorrentReporter:
             report.decision = rejection
             return
         received = as_utc(report.received_at)
-        history = await _latest_warnings(session, report.panel_user_ref)
+        # A later report can be selected first when the worker wraps around its
+        # batch cursor or an older report is waiting to retry.
+        older_undecided = await session.scalar(select(TorrentReport.id).where(
+            TorrentReport.panel_user_ref == report.panel_user_ref, _before(report),
+            text("processing_stage != 'done'"), TorrentReport.decision.is_(None),
+        ).limit(1))
+        if older_undecided is not None:
+            return
+        history = await _latest_warnings(session, report, before=False)
         number = 1
         if history:
             last = history[0]
-            if received < as_utc(last.received_at) + self.cooldown:
+            last_received = as_utc(last.received_at)
+            # Concurrent intake transactions may commit in a different order
+            # from their receipt timestamps. Keep the counted history monotonic.
+            if (received, report.id) < (last_received, last.id):
+                report.decision = "late_report"
+                return
+            if received < last_received + self.cooldown:
                 report.decision = "cooldown"
                 return
-            first = next(entry for entry in history if entry.warning_number == 1)
-            if received < as_utc(first.received_at) + WARNING_WINDOW:
-                number = last.warning_number + 1
-        if number > 3:
-            report.decision = "window_limit"
-        elif not sub.is_active or as_utc(sub.end_date) <= received:
+            if last.decision in RESET_PENDING:
+                return
+            if last.warning_number < 3:
+                first = next((entry for entry in history if entry.warning_number == 1), None)
+                if first and received < as_utc(first.received_at) + WARNING_WINDOW:
+                    number = last.warning_number + 1
+        if not sub.is_active or as_utc(sub.end_date) <= received:
             report.decision = "inactive_subscription"
         else:
             report.warning_number = number
-            report.decision = "disable_pending" if number == 3 else "warn"
+            report.decision = "reset_pending" if number == 3 else "warn"
 
-    async def _disable(self, factory: async_sessionmaker[AsyncSession], report: TorrentReport, now: datetime) -> str:
-        async with factory.begin() as session:
-            saved = await session.get(TorrentReport, report.id)
-            rejection = _policy_rejection(await session.get(TorrentReportSettings, 1), report.level)
-            if rejection:
-                return _cancel_disable(saved, rejection)
-            if as_utc(report.received_at) + WARNING_WINDOW <= now:
-                return _cancel_disable(saved, "window_expired")
-            history = await _latest_warnings(session, report.panel_user_ref, limit=2, before=report)
-            if _previous_warning_pending(history):
-                return "disable_pending"
-
-            user = await session.get(User, report.telegram_user_id, with_for_update=True)
-            sub = await subscription_dal.get_subscription_for_panel_ref(session, report.panel_user_ref)
-            if user is None or sub is None or sub.user_id != report.telegram_user_id:
-                saved.decision = "subscription_changed"
-                return saved.decision
-
-            panel_user = await self.panel.get_user_by_ref(report.panel_user_ref, log_response=False)
-            if (extract_panel_user_ref(panel_user) != report.panel_user_ref
-                    or panel_user.get("telegramId") not in (None, 0, report.telegram_user_id)):
-                saved.decision = "subscription_changed"
-                return saved.decision
-            status = panel_user.get("status")
-            if status != "DISABLED":
-                if status != "ACTIVE":
-                    saved.decision = "inactive_subscription"
+    async def _reset(self, factory: async_sessionmaker[AsyncSession], report: TorrentReport, now: datetime) -> str:
+        received = as_utc(report.received_at)
+        expired = received + WARNING_WINDOW <= now
+        while True:
+            async with factory.begin() as session:
+                user = await session.get(User, report.telegram_user_id, with_for_update=True)
+                saved = await session.get(TorrentReport, report.id, with_for_update=True)
+                if saved.decision not in RESET_PENDING:
                     return saved.decision
-                policy = await session.get(TorrentReportSettings, 1, populate_existing=True)
-                if rejection := _policy_rejection(policy, report.level):
-                    return _cancel_disable(saved, rejection)
-                if not await self.panel.update_user_status_on_panel(report.panel_user_ref, False, log_response=False):
-                    raise PanelUnavailableError("Custom torrent disable was not confirmed")
-            await session.execute(update(Subscription).where(
-                Subscription.panel_user_uuid == report.panel_user_ref,
-                Subscription.user_id == report.telegram_user_id,
-                (Subscription.is_active.is_(True) | (Subscription.subscription_id == sub.subscription_id)),
-            ).values(is_active=False, status_from_panel="DISABLED"))
-            saved.decision = "disabled"
-            return saved.decision
+                sub = await subscription_dal.get_subscription_for_panel_ref(session, report.panel_user_ref)
+                if user is None or sub is None or sub.user_id != report.telegram_user_id:
+                    return _cancel_reset(saved, "subscription_changed")
+
+                if saved.reset_marker is None:
+                    if rejection := _policy_rejection(await session.get(TorrentReportSettings, 1), report.level):
+                        return _cancel_reset(saved, rejection)
+                    history = await _latest_warnings(session, report)
+                    first = next((entry for entry in history if entry.warning_number == 1), None)
+                    if expired or first is None or received >= as_utc(first.received_at) + WARNING_WINDOW:
+                        return _cancel_reset(saved, "window_expired")
+                    if _previous_warning_pending(history):
+                        return saved.decision
+
+                panel_user = await self._panel_owner(report)
+                if panel_user is None:
+                    return _cancel_reset(saved, "subscription_changed")
+                marker = subscription_reset_marker(panel_user)
+                if saved.reset_marker is None or marker is None or marker == saved.reset_marker:
+                    if expired:
+                        return _cancel_reset(saved, "window_expired")
+                    expiry = panel_user.get("expireAt")
+                    if (not sub.is_active or as_utc(sub.end_date) <= now or panel_user.get("status") != "ACTIVE"
+                            or not isinstance(expiry, str) or as_utc(datetime.fromisoformat(expiry)) <= now):
+                        return _cancel_reset(saved, "inactive_subscription")
+                    policy = await session.get(TorrentReportSettings, 1, populate_existing=True)
+                    if rejection := _policy_rejection(policy, report.level):
+                        return _cancel_reset(saved, rejection)
+                if marker is None:
+                    raise PanelUnavailableError("Custom torrent reset marker unavailable")
+
+                if saved.reset_marker is None:
+                    # Commit before revoking so a retry can recognize a changed key.
+                    saved.reset_marker = marker
+                    continue
+                result = await self.subscriptions.reset_subscription_keys(
+                    session, report.telegram_user_id, report.panel_user_ref,
+                    previous_marker=saved.reset_marker, require_hwid_cleanup=True,
+                )
+                if not result:
+                    raise PanelUnavailableError("Custom torrent reset was not confirmed")
+                saved.decision = "reset"
+                return saved.decision
+
+    async def _panel_owner(self, report: TorrentReport) -> dict | None:
+        panel_user = await self.panel.get_user_by_ref(report.panel_user_ref, log_response=False)
+        if (panel_user and extract_panel_user_ref(panel_user) == report.panel_user_ref
+                and panel_user.get("telegramId") in (None, 0, report.telegram_user_id)):
+            return panel_user
+        return None
+
+    async def _block_server_name(self, report: TorrentReport) -> str:
+        try:
+            nodes = await self.panel.get_nodes()
+            node = next((node for node in (nodes or []) if isinstance(node, dict)
+                         and node.get("uuid") == report.node_uuid), None)
+            if node is not None:
+                parsed = ReportNode.model_validate(node)
+                if parsed.configProfile:
+                    return resolve_node_host_name(parsed, report.inbound_tag, await self.panel.get_hosts() or [])
+        except (PanelUnavailableError, ValidationError):
+            pass  # An unavailable or incomplete catalog must not delay warning delivery.
+        return report.node_name
 
     async def _notify_admin(self, factory: async_sessionmaker[AsyncSession],
                             report: TorrentReport, now: datetime) -> None:
@@ -339,10 +410,12 @@ class CustomTorrentReporter:
         minutes = 0
         if report.decision == "cooldown":
             async with factory() as session:
-                latest = await _latest_warnings(session, report.panel_user_ref, limit=1)
+                latest = await _latest_warnings(session, report, limit=1)
             if latest:
                 minutes = max(0, ceil((as_utc(latest[0].received_at) + self.cooldown - now).total_seconds() / 60))
         decision = report.decision.removesuffix(USER_NOTICE_DONE)
+        if decision in RESET_PENDING:
+            decision = "reset_pending"
         reason = self.i18n.gettext(lang, f"custom_torrent_result_{decision}",
                                    minutes=minutes, number=report.warning_number)
         details = json.dumps(report.details)
@@ -350,6 +423,7 @@ class CustomTorrentReporter:
             lang, "custom_torrent_admin_notice", result=reason, panel_id=report.panel_user_ref,
             user_id=report.telegram_user_id or "—", ip=report.client_ip, level=report.level,
             node=escape(report.node_name), node_uuid=report.node_uuid, inbound=escape(report.inbound_tag),
+            mod=report.block_mode or "—", seconds=report.block_seconds if report.block_seconds is not None else "—",
             score=escape(json.dumps(report.details["score"])[:80]) if "score" in report.details else "—",
             details=escape(details[:1000] + ("…" if len(details) > 1000 else "")),
             window_start=as_utc(report.window_start).strftime("%Y-%m-%d %H:%M:%S"),
@@ -363,7 +437,7 @@ class CustomTorrentReporter:
     async def _notify_user(self, factory: async_sessionmaker[AsyncSession], report: TorrentReport) -> bool:
         async with factory() as session:
             if report.decision == "warn" and report.warning_number == 2:
-                history = await _latest_warnings(session, report.panel_user_ref, limit=1, before=report)
+                history = await _latest_warnings(session, report, limit=1)
                 if _previous_warning_pending(history):
                     return False
             user = await session.get(User, report.telegram_user_id)
@@ -372,11 +446,37 @@ class CustomTorrentReporter:
                     or (report.decision == "disabled" and sub.status_from_panel != "DISABLED")):
                 return True
             lang = user.language_code or self.settings.DEFAULT_LANGUAGE
-        key = "custom_torrent_user_disabled" if report.decision == "disabled" else "custom_torrent_user_warning"
+        markup = get_user_banned_keyboard(self.settings.SUPPORT_LINK, lang, self.i18n)
+        decision = "warning" if report.decision == "warn" else report.decision
+        key = f"custom_torrent_user_{decision}"
+        if report.decision == "reset":
+            panel_user = await self._panel_owner(report)
+            if panel_user is None:
+                return True
+            _, link = await prepare_config_links(self.settings, panel_user.get("subscriptionUrl"))
+            if not link:
+                raise PanelUnavailableError("Custom torrent reset connection link unavailable")
+            connect = InlineKeyboardButton(
+                text=self.i18n.gettext(lang, "connect_button"), url=link,
+                icon_custom_emoji_id=PREMIUM_EMOJI_PAPER_PLANE, style="primary",
+            )
+            if markup is None:
+                markup = InlineKeyboardMarkup(inline_keyboard=[[connect]])
+            else:
+                markup.inline_keyboard.insert(0, [connect])
+        message = self.i18n.gettext(lang, key, number=report.warning_number)
+        if report.block_mode and report.block_seconds:
+            server = await self._block_server_name(report)
+            block = self.i18n.gettext(
+                lang, f"custom_torrent_block_{report.block_mode}",
+                ip=report.client_ip, server=escape(server), seconds=report.block_seconds,
+            )
+            message = f"{message}\n\n{block}"
+        message += "\n\n" + self.i18n.gettext(lang, "custom_torrent_server_rules")
         try:
             await self.bot.send_message(
-                report.telegram_user_id, self.i18n.gettext(lang, key, number=report.warning_number),
-                reply_markup=get_user_banned_keyboard(self.settings.SUPPORT_LINK, lang, self.i18n),
+                report.telegram_user_id, message,
+                reply_markup=markup,
                 parse_mode="HTML", request_timeout=8,
             )
         except TelegramForbiddenError:
